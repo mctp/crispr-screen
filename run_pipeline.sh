@@ -39,12 +39,11 @@ then
 	exit 1
 fi
 
-# source generate_reference_files.sh
+source generate_reference_files.sh
 
-# source make_bt2_index.sh
+source make_bt2_index.sh
 
-#for i in ${!LIBRARIES[@]}
-for i in 0
+for i in ${!LIBRARIES[@]}
 do
 	LIBRARY="${LIBRARIES[$i]}"
 	SAMPLE="${SAMPLE_NAMES[$i]}"
@@ -57,9 +56,9 @@ do
 	IN_R1_FASTQ=$(echo "${FASTQ_FILES[$i]}" | gawk 'BEGIN{FS=","}{print $1}')
 	IN_R2_FASTQ=$(echo "${FASTQ_FILES[$i]}" | gawk 'BEGIN{FS=","}{print $2}')
 
-#	source trim_reads.sh
+	source trim_reads.sh
 
-#	source align_bt2.sh
+	source align_bt2.sh
 
 	source count_mageck.sh
 
