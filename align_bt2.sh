@@ -1,0 +1,24 @@
+#!/bin/bash
+
+# output names
+SGRNA_LIST_PREFIX=$REFERENCES_DIR/$SGRNA_LIST_NAME # also same as bt2 index prefix
+SGRNA_FASTA=$SGRNA_LIST_PREFIX.fa
+
+LIBRARY_DIR=$WORKING_DIR/$LIBRARY
+LIBRARY_PREFIX=$LIBRARY_DIR/$LIBRARY
+OUT_BAM=$LIBRARY_PREFIX.aligned.bam
+OUT_STATS=$LIBRARY_PREFIX.aligned.stats
+
+OUT_R1_FASTQ=$LIBRARY_PREFIX.R1.fq
+OUT_R2_FASTQ=$LIBRARY_PREFIX.R2.fq
+OUT_COMBINED_FASTQ=$LIBRARY_PREFIX.fq
+
+mkdir -p $LIBRARY_DIR
+
+echo "begin bowtie2 alignment..."
+
+# align
+bowtie2 -p 12 -x $SGRNA_LIST_PREFIX -U $OUT_COMBINED_FASTQ --norc | samtools view -@ $NCPU -bS - > $OUT_BAM
+
+# stats
+samtools stats $OUT_BAM > $OUT_STATS

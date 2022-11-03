@@ -1,0 +1,10 @@
+#!/bin/bash
+
+# output names
+SGRNA_LIST_PREFIX=$REFERENCES_DIR/$SGRNA_LIST_NAME
+SGRNA_FASTA=$SGRNA_LIST_PREFIX.fa
+
+# make index
+bowtie2-build $SGRNA_FASTA $SGRNA_LIST_PREFIX
+
+
