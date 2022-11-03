@@ -19,14 +19,14 @@ this small pipeline takes in sequence data (paired-end fastq files) containing s
 
 
 # software requirements
-bowtie2 2.4.5
-samtools 1.6
-cutadapt 4.1
-mageck 0.5.9.5
-a linux-like command-line environment
+* bowtie2 2.4.5
+* samtools 1.6
+* cutadapt 4.1
+* mageck 0.5.9.5
+* a linux-like command-line environment
 
 ## optional software
-GNU parallel (we use parsort if available)
+* GNU parallel (we use parsort if available)
 
 ## conda setup
 conda is not required, but setting up a conda environment may be convenient.
@@ -41,12 +41,14 @@ conda is not required, but setting up a conda environment may be convenient.
 
 # pipeline setup
 
-1. acquire sgRNA list file for CRISPR library. This code was written around a 2 column file (shRNA ID, sequence), which is reformatted by this code to work with MAGeCK.
-2. create a sample metadata file (e.g. `sample_metadata.txt`).  This should be a 3 column tab-delimited text file with header. Column names do not matter, but order and format does.  
-  a. col 1 (library) is a library ID  
-  b. col 2 (sample) is a sample name/alias, preferably something easy to read.  But use no spaces and keep it short!  
-  c. col 3 (fastqs) is a comma-separated list of fastq files (e.g. `R1.fq.fz,R2.fq.gz`). Full path or file name accepted (as long as the path to fastqs is specified in `config.sh`).  Currently, only 2 fastq files are allowed, R1 and R2, so combine in advance where R1 and/or R2 have multiple associated fastq files. Todo: remove this constraint.  
-3. edit the `config.sh` file. Use the example values as a guide and heed the comments.
+1. acquire sgRNA list file for CRISPR library. This code was written around a 2 column file (shRNA ID, sequence), which is reformatted by this code to work with MAGeCK. An example list `human.sgRNAs.txt` is in the base repo dir.  
+    1. if your sgRNA list is already formatted for MAGeCK (sgRNA ID, sgRNA sequence, target/gene name), then you should edit `generate_reference_files.sh` replacing the `gawk` command under `# format for mageck` with something like  
+  `cp $ORIG_SGRNA_LIST_FILE $SGRNA_LIST_FILE`  
+2. create sample metadata file (e.g. `sample_metadata.txt`) and place in base repo dir.  This should be a 3 column tab-delimited text file with header. Column names do not matter, but order and format does.  Example file in `examples/`.  
+    1. col 1 (library) is a library ID  
+    2. col 2 (sample) is a sample name/alias, preferably something easy to read.  But use no spaces and keep it short!  
+    3. col 3 (fastqs) is a comma-separated list of fastq files (e.g. `R1.fq.fz,R2.fq.gz`). Full path or file name accepted (as long as the path to fastqs is specified in `config.sh`).  Currently, only 2 fastq files are allowed, R1 and R2, so combine in advance where R1 and/or R2 have multiple associated fastq files. Todo: remove this constraint.  
+3. Copy `config.sh` from 'examples/' to base repo dir.  Edit values to suit your needs, heeding the comments.
 
 # run pipeline
 
