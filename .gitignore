@@ -1,0 +1,7 @@
+# user defined configuration files are ignored
+# changes in /examples are tracked
+configure/
+
+# files in references are created by user and not tracked
+references/
+
