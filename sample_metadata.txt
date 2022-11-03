@@ -1,0 +1,5 @@
+library	sample	fastqs
+library1	control_1	library1.R1.fq.gz,library1.R2.fq.gz
+library2	control_2	library2.R1.fq.gz,library2.R2.fq.gz
+library3	treated_1	library3.R1.fq.gz,library3.R2.fq.gz
+library4	treated_2	library4.R1.fq.gz,library4.R2.fq.gz
