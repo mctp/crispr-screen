@@ -15,6 +15,7 @@ this small pipeline takes in sequence data (paired-end fastq files) containing s
   * trim R1 and R2 separately using 5' vector sequence adjacent to sgRNA
   * return only matching (trimmed) reads, cut to 20 bases and not less than 18 bases
   * combine R1 and R2 results into single fastq file
+* align modified reads to custom reference index
 * count reads
 
 
