@@ -39,9 +39,52 @@ then
 	exit 1
 fi
 
-source generate_reference_files.sh
+reformat_sgrna_list=FALSE # mostly not used any more, so default is FALSE
+generate_references_cmd_opts=
+skip_references=FALSE
 
-source make_bt2_index.sh
+while [ "$#" -gt 0 ]
+do
+    case "$1" in
+        --skip-references )
+           skip_references=TRUE
+           shift 1
+           ;;
+        --reformat-sgrna-list )
+           reformat_sgrna_list=TRUE
+		   generate_references_cmd_opts="$generate_references_cmd_opts --reformat-sgrna-list"
+           shift 1
+           ;;
+        -*|--* )
+            echo "unknown option $1" >&2
+            exit 1
+            ;;
+        *)
+            args+="$1"
+            shift 1
+            ;;
+    esac
+done
+
+# skip ref/index if explicitly set or if output files exist with a test
+if [[ "$skip_references" == "TRUE" ]]
+then
+	echo "skipping reference generataion."
+else
+	if [[ -e "$REFERENCES_DIR/sgRNAs.fa" ]]
+	then
+		echo "file exists, skipping reference generation."
+	else
+		source generate_reference_files.sh $generate_references_cmd_opts
+	fi
+
+	if [[ -e "$REFERENCES_DIR/sgRNAs.1.bt2" ]]
+	then
+		echo "file exists, skipping bt2 index generation."
+	else
+		source make_bt2_index.sh
+	fi 
+fi 
 
 for i in ${!LIBRARIES[@]}
 do
