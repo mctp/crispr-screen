@@ -51,7 +51,7 @@ else
 fi
 
 # make fasta
-gawk 'BEGIN{FS=OFS="\t"}{print ">"$1"\n"$2}' $SGRNA_LIST_FILE > $SGRNA_LIST_NAME.bare_sgrna.fa
+gawk 'BEGIN{FS=OFS="\t"}(FNR>1){print ">"$1"\n"$2}' $SGRNA_LIST_FILE > $SGRNA_LIST_NAME.bare_sgrna.fa
 
 # flank grnas with backbone sequence
 gawk \
