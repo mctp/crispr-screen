@@ -1,13 +1,16 @@
-WORKING_DIR=~  # path to working dir, this must exist!
+# for docker use, dirs are relative to the docker container, not the host!
 
-OUTPUT_DIR=$WORKING_DIR
-METADATA_FILE=$OUTPUT_DIR/sample_metadata.txt # tab delim table with library, sample, fastqs (comma sep)
-FASTQ_DIR=~/fastq  # if metadata gives only file names, do not leave this blank!  if blank, uses metadata verbatim
+WORKING_DIR=/repo  # path to working dir, this must exist!
+
+METADATA_FILE=$WORKING_DIR/sample_metadata.txt # tab delim table with library, sample, fastqs (comma sep)
+
+OUTPUT_DIR=/output  
+FASTQ_DIR=/input   # if metadata gives only file names, do not leave this blank!  if blank, uses metadata verbatim
 
 # references
 SGRNA_LIST_NAME=sgRNAs
 REFERENCES_DIR=$OUTPUT_DIR/references
-ORIG_SGRNA_LIST_FILE=$WORKING_DIR/human.sgRNAs.txt # original file which was just 2 cols: id, seq
+ORIG_SGRNA_LIST_FILE=$WORKING_DIR/human.sgRNAs.txt
 
 # sequences to add to left and right of sgRNA sequence in the fasta file used to make the bowtie2 index
 US_SEQ="gttatcaacttgaaaaagtggcaccg"  # 3' sequence adjacent to sgRNA, recommended use at least 18 bases

@@ -31,10 +31,10 @@ fi
 
 source config.sh
 
-if [[ "$WORKING_DIR" == "" || ${#LIBRARIES[@]} -lt 1 ]]
+if [[ "$OUTPUT_DIR" == "" || ${#LIBRARIES[@]} -lt 1 ]]
 then
 	echo "required variables missing. check config.sh and sample_metadata.txt"
-	echo "working dir: $WORKING_DIR"
+	echo "output dir: $OUTPUT_DIR"
 	echo "${#SAMPLES[@]} libraries: ${LIBRARIES[@]}"
 	exit 1
 fi
