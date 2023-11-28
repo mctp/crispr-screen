@@ -19,11 +19,15 @@ this small pipeline takes in sequence data (paired-end fastq files) containing s
 * count reads
 
 # software requirements
-* bowtie2 2.4.5
-* samtools 1.6
-* cutadapt 4.1
+* bowtie2 2.4.5 (2.5.2 ok)
+* samtools 1.6 (1.18 ok)
+* cutadapt 4.1 (4.5 ok)
 * mageck 0.5.9.5
-* a linux-like command-line environment
+* a linux-like command-line environment with the following command utilities
+  * column (from util-linux package)
+  * gawk (awk pretending to be gawk will work)
+  * file
+  * dos2unix
 
 ## optional software
 * GNU parallel (we use parsort if available)
@@ -51,8 +55,20 @@ a docker option is outlined below.  this repo includes two files, `docker/Docker
   ```
   cd docker
   docker build --quiet --tag my_pipelines/crispr:0.1 .
+  cd -
   ```
-3.  run the docker container (interactive use), providing access to the repo code, input directory, and output directory
+4. run the docker container / start the pipeline with a single command
+  ```
+  base_dir=$(pwd)
+  # container runs in background and removes itself when finished.  use -ti instead of -dt if you want to see the pipeline output in the current terminal
+  docker run --rm -dt --name crispr-pipeline \
+    -v $base_dir:/repo \
+    -v $base_dir/output:/output \
+    -v $base_dir/input:/input \
+    my_pipelines/crispr:0.1 \
+    bash -c "cd /repo && bash run_pipeline.sh"
+  ```
+3.  run the docker container interactively, providing access to the repo code, input directory, and output directory
   ```
   base_dir=($pwd)
   # make dirs if they do not exist
@@ -71,16 +87,10 @@ a docker option is outlined below.  this repo includes two files, `docker/Docker
   # run pipeline
   cd /repo
   bash run_pipeline.sh
-  ```
-4. run the docker container and start the pipeline in a single command
-  ```
-  base_dir=$(pwd)
-  docker run --rm -dt --name crispr-pipeline \
-    -v $base_dir:/repo \
-    -v $base_dir/output:/output \
-    -v $base_dir/input:/input \
-    my_pipelines/crispr:0.1 \
-    "bash /repo/run_pipeline.sh" 
+  # do work
+  # exit container e.g. cntrl+d and stop the container if done
+  docker stop crispr-pipeline
+  docker rm crispr-pipeline
   ```
 # pipeline setup
 

@@ -32,8 +32,13 @@ done
 
 if [[ "$reformat_sgrna_list" == "FALSE" ]]
 then
+	 
+	source validate_sgrna_list.sh --file $ORIG_SGRNA_LIST_FILE
 	cp $ORIG_SGRNA_LIST_FILE $SGRNA_LIST_FILE
 else
+
+	source validate_sgrna_list.sh --file $ORIG_SGRNA_LIST_FILE --two-col-format
+
 	#format for mageck: extract gene name from sgRNA IDs and place into a 3rd column
 	gawk 'BEGIN{
 			FS=OFS="\t"
