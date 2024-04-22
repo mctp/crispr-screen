@@ -92,7 +92,7 @@ do
 	SAMPLE="${SAMPLE_NAMES[$i]}"
 
 	# change sample name to library id if sample name empty
-	if [[ "$SAMPLE" == "" ]]
+	if [[ "$SAMPLE" == "" || FORCE_LIBRARY_AS_NAME == "TRUE" ]]
 	then
 		SAMPLE="$LIBRARY"
 	fi
