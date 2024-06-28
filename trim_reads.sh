@@ -4,6 +4,8 @@ SAMPLE_DIR=$OUTPUT_DIR/$SAMPLE
 SAMPLE_PREFIX=$SAMPLE_DIR/$SAMPLE
 OUT_R1_FASTQ=$SAMPLE_PREFIX.R1.fq
 OUT_R2_FASTQ=$SAMPLE_PREFIX.R2.fq
+OUT_R1_UNTRIMMED_FASTQ=$SAMPLE_PREFIX.R1.untrimmed.fq
+OUT_R2_UNTRIMMED_FASTQ=$SAMPLE_PREFIX.R2.untrimmed.fq
 OUT_COMBINED_FASTQ=$SAMPLE_PREFIX.fq
 
 mkdir -p $SAMPLE_DIR
@@ -18,9 +20,13 @@ fi
 echo "using $SORT to sort."
 
 # run cutadapt for each R1/R2 then combine
-cutadapt -m 18 -j $NCPU -O 18 -g $TRIM_SEQ -l 20 --discard-untrimmed -o $OUT_R1_FASTQ $IN_R1_FASTQ
-cutadapt -m 18 -j $NCPU -O 18 -g $TRIM_SEQ -l 20 --discard-untrimmed -o $OUT_R2_FASTQ $IN_R2_FASTQ
+# cutadapt -m 18 -j $NCPU -O 18 -g $TRIM_SEQ -l 20 --discard-untrimmed -o $OUT_R1_FASTQ $IN_R1_FASTQ
+# cutadapt -m 18 -j $NCPU -O 18 -g $TRIM_SEQ -l 20 --discard-untrimmed -o $OUT_R2_FASTQ $IN_R2_FASTQ
+
+cutadapt -m 18 -j $NCPU -O 18 -g $TRIM_SEQ -l 20 --untrimmed-output $OUT_R1_UNTRIMMED_FASTQ -o $OUT_R1_FASTQ $IN_R1_FASTQ
+cutadapt -m 18 -j $NCPU -O 18 -g $TRIM_SEQ -l 20 --untrimmed-output $OUT_R2_UNTRIMMED_FASTQ -o $OUT_R2_FASTQ $IN_R2_FASTQ
 cat $OUT_R1_FASTQ $OUT_R2_FASTQ > $OUT_COMBINED_FASTQ
+
 
 # check that no read names are duplicated --- no read pair should BOTH pass trimming filter!
 

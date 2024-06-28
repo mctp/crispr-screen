@@ -11,25 +11,28 @@ then
 	echo "required software is not installed or on the current PATH:"
 	if [[  "$SAMTOOLS_PATH" == "" ]]
 	then
-		echo "samtools"
+		echo "  samtools"
 	fi
 	if [[  "$BOWTIE2_PATH" == "" ]]
 	then
-		echo "bowtie2"
+		echo "  bowtie2"
 	fi
 	if [[  "$CUTADAPT_PATH" == "" ]]
 	then
-		echo "cutadapt"
+		echo "  cutadapt"
 	fi
 	if [[  "$MAGECK_PATH" == "" ]]
 	then
-		echo "mageck"
+		echo "  mageck"
 	fi
 	echo "exiting..."
 	exit 1
 fi
+SEARCH_REVCOMP=FALSE
 
 source config.sh
+
+echo "search revcomp? $SEARCH_REVCOMP"
 
 if [[ "$OUTPUT_DIR" == "" || ${#LIBRARIES[@]} -lt 1 ]]
 then
@@ -90,18 +93,53 @@ for i in ${!LIBRARIES[@]}
 do
 	LIBRARY="${LIBRARIES[$i]}"
 	SAMPLE="${SAMPLE_NAMES[$i]}"
+	echo "$LIBRARY: $SAMPLE"
 
 	# change sample name to library id if sample name empty
 	if [[ "$SAMPLE" == "" || FORCE_LIBRARY_AS_NAME == "TRUE" ]]
 	then
 		SAMPLE="$LIBRARY"
 	fi
-	IN_R1_FASTQ=$(echo "${FASTQ_FILES[$i]}" | gawk 'BEGIN{FS=","}{print $1}')
-	IN_R2_FASTQ=$(echo "${FASTQ_FILES[$i]}" | gawk 'BEGIN{FS=","}{print $2}')
+	IN_R1_FASTQ=$(echo "${FASTQ_FILES[$i]}" | gawk 'BEGIN{FS=";"}{print $1}')
+	IN_R2_FASTQ=$(echo "${FASTQ_FILES[$i]}" | gawk 'BEGIN{FS=";"}{print $2}')
 
-	source trim_reads.sh
+	if [[ "$IN_R1_FASTQ" =~ , ]]
+	then
+		echo "multiple input fastq detected."
+		R1_space=$(echo "$IN_R1_FASTQ" | tr ',' ' ')
+		R2_space=$(echo "$IN_R2_FASTQ" | tr ',' ' ')
 
-	source align_bt2.sh
+		if [[ "$IN_R1_FASTQ" =~ gz$ ]]
+		then # gzipped
+			IN_R1_FASTQ=$OUTPUT_DIR/${LIBRARY}_combined_R1.fq.gz
+			IN_R2_FASTQ=$OUTPUT_DIR/${LIBRARY}_combined_R2.fq.gz
+		else # not gzipped
+			IN_R1_FASTQ=$OUTPUT_DIR/${LIBRARY}_combined_R1.fq
+			IN_R2_FASTQ=$OUTPUT_DIR/${LIBRARY}_combined_R2.fq
+		fi
+
+		if [[ ! -e "$IN_R1_FASTQ" ]]
+		then
+			echo "merging $R1_space"
+			echo "to: $IN_R1_FASTQ"
+			cat $R1_space > $IN_R1_FASTQ
+		fi
+		
+		if [[ ! -e "$IN_R2_FASTQ" ]]
+		then
+			echo "merging $R2_space"
+			echo "to: $IN_R2_FASTQ"
+			cat $R2_space > $IN_R2_FASTQ
+		fi
+	fi
+	echo
+	echo "r1: $IN_R1_FASTQ"
+	echo "r2: $IN_R2_FASTQ"
+	echo
+
+	#source trim_reads.sh
+
+	#source align_bt2.sh
 
 	source count_mageck.sh
 

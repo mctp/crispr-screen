@@ -19,6 +19,7 @@ echo "begin bowtie2 alignment..."
 
 # align
 bowtie2 -p $NCPU -x $SGRNA_LIST_PREFIX -U $OUT_COMBINED_FASTQ --norc | samtools view -@ $NCPU -bS - > $OUT_BAM
+#bowtie2 -p $NCPU -x $SGRNA_LIST_PREFIX -U $OUT_COMBINED_FASTQ | samtools view -@ $NCPU -bS - > $OUT_BAM
 
 # stats
 samtools stats $OUT_BAM > $OUT_STATS
