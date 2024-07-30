@@ -86,8 +86,8 @@ else
 		echo "file exists, skipping bt2 index generation."
 	else
 		source make_bt2_index.sh
-	fi 
-fi 
+	fi
+fi
 
 for i in ${!LIBRARIES[@]}
 do
@@ -124,7 +124,7 @@ do
 			echo "to: $IN_R1_FASTQ"
 			cat $R1_space > $IN_R1_FASTQ
 		fi
-		
+
 		if [[ ! -e "$IN_R2_FASTQ" ]]
 		then
 			echo "merging $R2_space"
@@ -137,9 +137,9 @@ do
 	echo "r2: $IN_R2_FASTQ"
 	echo
 
-	#source trim_reads.sh
+	source trim_reads.sh
 
-	#source align_bt2.sh
+	source align_bt2.sh
 
 	source count_mageck.sh
 

@@ -8,9 +8,9 @@ mkdir -p $REFERENCES_DIR
 
 echo "search revcomp? $SEARCH_REVCOMP"
 
-# convert text to unix style
-dos2unix -n $SGRNA_LIST_FILE $SGRNA_LIST_FILE.tmp
-mv $SGRNA_LIST_FILE.tmp $SGRNA_LIST_FILE
+## convert text to unix style
+#dos2unix -n $SGRNA_LIST_FILE $SGRNA_LIST_FILE.tmp
+#mv $SGRNA_LIST_FILE.tmp $SGRNA_LIST_FILE
 
 reformat_sgrna_list=FALSE # mostly not used any more, so default is FALSE
 
