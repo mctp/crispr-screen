@@ -1,2 +1,2 @@
 library	sample	fastq_r1	fastq_r2
-SI_37420	msmet_plasmid	rawdata/mctp_SI_37420_HVML3DRX3_1_1.fq.gz,rawdata/mctp_SI_37420_HVML3DRX3_2_1.fq.gz	rawdata/mctp_SI_37420_HVML3DRX3_1_2.fq.gz,rawdata/mctp_SI_37420_HVML3DRX3_2_2.fq.gz
+library_id	sample_name	library_id_1_1.fq.gz,library_id_2_1.fq.gz	library_id_1_2.fq.gz,library_id_2_2.fq.gz

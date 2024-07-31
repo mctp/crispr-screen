@@ -27,7 +27,6 @@ this small pipeline takes in sequence data (paired-end fastq files) containing s
   * column (from util-linux package)
   * gawk (awk pretending to be gawk will work)
   * file
-  * dos2unix
 
 ## optional software
 * GNU parallel (we use parsort if available)
@@ -94,18 +93,21 @@ a docker option is outlined below.  this repo includes two files, `docker/Docker
   ```
 # pipeline setup
 
-1. acquire sgRNA list file for CRISPR library and place it in the base repo. example: `examples/human.sgRNAs.txt`
-    1. your sgRNA list should be formatted for MAGeCK (sgRNA ID, sgRNA sequence, target/gene name)  
-    2. uncommon/legacy: if your sgRNA library file contains 2 columns (id/sequence) where the id column is in the form sg<gene_name>_<numeric_id> use the `--reformat-sgrna-list` cmd line option when running `run_pipeline.sh` 
+1. acquire sgRNA list file for CRISPR library and place it in the base repo. For example, call it `sgRNAs.txt`
+    1. your sgRNA list should be formatted for MAGeCK (sgRNA ID, sgRNA sequence, target/gene name)
+    2. The sgRNA list should have Unix style (LF) line endings and not Windows style (CRLF)
+    3. use the validation tool: `bash validate_sgrna_list.sh --file sgRNAs.txt`
+    3. uncommon/legacy: if your sgRNA library file contains 2 columns (id/sequence) where the id column is in the form sg<gene_name>_<numeric_id> use the `--reformat-sgrna-list` cmd line option when running `run_pipeline.sh` 
 
-2. create sample metadata file and place in base repo dir. example: `examples/sample_metadata.txt`.  This should be a 3 column tab-delimited text file with header. Column names do not matter, but order and format does.
+2. create sample metadata file and place in base repo dir. example: `examples/sample_metadata.txt`.  This should be a 4 column tab-delimited text file with header. Column names do not matter, but order and format does.
     1. col 1 (library) is a library ID  
     2. col 2 (sample) is a sample name/alias, preferably something easy to read.  But use no spaces and keep it short!  
-    3. col 3 (fastqs) is a comma-separated list of fastq files (e.g. `R1.fq.fz,R2.fq.gz`). Full path or file name accepted (as long as the path to fastqs is specified in `config.sh`).  Currently, only 2 fastq files are allowed, R1 and R2, so combine in advance where R1 and/or R2 have multiple associated fastq files. Todo: remove this constraint.  
+    3. col 3 (fastq_r1) is a comma-separated list of fastq files (e.g. `library_lane1_R1.fq.gz,library_lane2_R1.fq.gz`). Full path or file name accepted. If file name only, fastq path must be set in `config.sh`.
+    4. col 4 (fastq_r2) is a comma-separated list of fastq files (e.g. `library_lane1_R2.fq.gz,library_lane2_R2.fq.gz`). Full path or file name accepted.  If file name only, fastq path must be set in `config.sh`.
 
 3. create configuration script called `config.sh`.  Edit as needed. 
     1. Example: `examples/config.sh`. 
-    2. Example for docker: `examples/config_docker.sh`.
+    2. Note if using docker that paths are relative to the docker container not the host machine.
 
 # run pipeline
 
