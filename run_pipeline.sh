@@ -1,5 +1,7 @@
 #!/bin/bash
 
+set -e  # exit on error
+
 # check software requirements
 BOWTIE2_PATH=$(which bowtie2)
 CUTADAPT_PATH=$(which cutadapt)
@@ -144,7 +146,7 @@ do
             time python reorient_fastq_parallel.py \
                 --cpus $NCPU \
                 --batch-size 1000 \
-                $US_SEQ \
+                "${upstream_seqs[0]}" \
                 $IN_R1_FASTQ $IN_R2_FASTQ \
                 $IN_R1_RE_FASTQ $IN_R2_RE_FASTQ \
                 $INTERLEAVED_FASTQ

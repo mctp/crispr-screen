@@ -7,13 +7,20 @@
 
 MODE=fastq # fastq (preferred), bam, grep (experimentation only)
 
-reorient_fastq=TRUE # if PCR product is blunt end ligated and thus orientation of reads are randomly flipped
-
-ignore_r2=TRUE      # set FALSE if not using paired-end reads OR if R2 cannot cover the sgRNA sequence
-
 SEARCH_REVCOMP=TRUE # fastq mode: when counting reads, search for reverse complement of sgrna sequence
 					# bam mode: when generating aligner reference, use reverse complement of the sgrna sequence
                     # try changing this if mapping rate is low
+
+# fastq mode only
+reorient_fastq=TRUE # if PCR product is blunt end ligated and thus orientation of reads are randomly flipped
+ignore_r2=TRUE      # set FALSE if not using paired-end reads OR if R2 cannot cover the sgRNA sequence
+#trim5_lengths=120 # comma-separated numbers or leave empty for default (recommended)
+#keep_tmp=TRUE  # FALSE recommended
+#save_unmapped=TRUE # FALSE recommended
+
+# notes:
+#       save_unmapped TRUE is incompatible with trim5_lengths with more than 1 value
+#       sgrna length forced to 20 if trim5_lengths, keep_tmp, and/or save_unmapped are set
 
 #######################
 ####   resources   ####
@@ -42,10 +49,10 @@ OUTPUT_DIR=/output # this dir must exist. if using docker, write permissions may
 ####   references   ####
 ########################
 
-ORIG_SGRNA_LIST_FILE=$WORKING_DIR/sgRNAs.txt
+ORIG_SGRNA_LIST_FILE=$WORKING_DIR/sgrnas.txt
 
 # files derived from ORIG_SGRNA_LIST_FILE will use this base name
-SGRNA_LIST_NAME=sgRNAs
+SGRNA_LIST_NAME=sgrnas
 
 # only required for bam mode
 REFERENCES_DIR=$OUTPUT_DIR/references
@@ -79,7 +86,7 @@ TRIM_SEQ=tagccttattttaacttgctatttctagctctaaaac # trim sequence is 5' vector sequ
 # the code will not check reverse complement of these sequences!
 
 # upstream sequences define new R1
-upstream_seqs=(taacttgctatttctagctctaaaac)
+upstream_seqs=(cttgctatttctagctctaaaac)
 # downstream sequences define new R2
 downstream_seqs=(cggtgtttcgtcctttccacaag)
 
