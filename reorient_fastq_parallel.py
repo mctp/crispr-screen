@@ -104,7 +104,7 @@ if chunk_count == 0:
                 chunk_file.close()
                 chunk_count += 1
                 chunk_file = open(f"{fastq_interleaved}.{chunk_count}", "w")
-        chunk_file.close()d
+        chunk_file.close()
     print(f"Chunked files generated from {fastq_interleaved}")
 
 def process_batch(batch, search_sequences_r1, search_sequences_r2):
