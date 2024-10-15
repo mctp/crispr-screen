@@ -240,13 +240,18 @@ do
         if [[ ! -e "$IN_R1_RE_FASTQ" || ! -e "$IN_R2_RE_FASTQ" ]]
         then
             echo "reorienting fastq files (this will take a long time)..."
+            
             time python reorient_fastq_parallel.py \
+                --sequences-r1 $(IFS=,; echo "${r1_seqs[*]}") \
+                --sequences-r2 $(IFS=,; echo "${r2_seqs[*]}") \
                 --cpus $NCPU \
                 --batch-size 1000 \
-                "${upstream_seqs[0]}" \
-                $IN_R1_FASTQ $IN_R2_FASTQ \
-                $IN_R1_RE_FASTQ $IN_R2_RE_FASTQ \
-                $INTERLEAVED_FASTQ
+                --in-fastq-r1 $IN_R1_FASTQ \
+                --in-fastq-r2 $IN_R2_FASTQ \
+                --out-fastq-r1 $IN_R1_RE_FASTQ \
+                --out-fastq-r2 $IN_R2_RE_FASTQ \
+                --file-interleaved-gz $INTERLEAVED_FASTQ
+
         else
             echo "reoriented fastq files already exist, skipping reorientation."
         fi
