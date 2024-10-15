@@ -138,6 +138,103 @@ do
         cat $R2_space > $IN_R2_FASTQ
     fi
 
+    FASTQ_STATS_FILE="$OUTPUT_DIR/fastq_stats.txt"
+
+    if [[ ! -e "$FASTQ_STATS_FILE" ]]; then
+        echo -e "library\tread_count" > "$FASTQ_STATS_FILE"
+    fi
+
+    # Check if the library already has a read count
+    READ_COUNT=$(gawk \
+        -v lib="$LIBRARY" \
+        'BEGIN{
+            FS=OFS="\t"
+        }{
+            if(FNR==1){
+                for(i=1; i<=NF; i++){
+                    header[$i] = i
+                }
+            }else{
+                if($header["library"] == lib){
+                    print $header["read_count"]
+                    exit
+                }
+            }
+        }END{
+            print -1
+        }' "$FASTQ_STATS_FILE")
+
+    if [[ -z "$READ_COUNT" || "$READ_COUNT" -le 0 ]]
+    then
+        echo "Computing read count for $LIBRARY"
+        NEW_READ_COUNT=$(zcat "$IN_R1_FASTQ" | wc -l | gawk '{print $1/4}')
+        echo "was:  $READ_COUNT"
+        echo "now:  $NEW_READ_COUNT"
+        # Report the read count in the fastq_stats file
+        if [[ "$READ_COUNT" != "-1" ]]
+        then
+            # Update existing entry
+            gawk \
+                -v lib="$LIBRARY" \
+                -v count="$NEW_READ_COUNT" \
+                'BEGIN{
+                    FS=OFS="\t"
+                }{
+                    if(FNR==1){
+                        for(i=1; i<=NF; i++){
+                            header[$i] = i
+                        }
+                    }else{
+                        if($header["library"] == lib){
+                            $header["read_count"] = count
+                        }
+                    }
+                    print $0
+                }' "$FASTQ_STATS_FILE" \
+            > "$FASTQ_STATS_FILE.tmp" && mv "$FASTQ_STATS_FILE.tmp" "$FASTQ_STATS_FILE"
+        else
+            # Add new entry
+            gawk \
+                -v lib="$LIBRARY" \
+                -v count="$NEW_READ_COUNT" \
+                'BEGIN{
+                    FS=OFS="\t"
+                }{
+                    if(FNR==1){
+                        # find "library" and "read_count" columns
+                        for(i=1; i<=NF; i++){
+                            header[$i] = i
+                        }
+                    }
+                    print $0
+                }END{
+                    for(i=1;i<=NF;i++){
+                        if(i == header["library"]){
+                            if(i==1){
+                                printf lib
+                            }else{
+                                printf OFS lib
+                            }
+                        }else if(i == header["read_count"]){
+                            if(i==1){
+                                printf count
+                            }else{
+                                printf OFS count
+                            }
+                        }else{
+                            if(i==1){
+                                printf $i
+                            }else{
+                                printf OFS $i
+                            }
+                        }
+                    }
+                    printf ORS
+                }' "$FASTQ_STATS_FILE" \
+            > "$FASTQ_STATS_FILE.tmp" && mv "$FASTQ_STATS_FILE.tmp" "$FASTQ_STATS_FILE"
+        fi
+    fi
+
     if [[ "$reorient_fastq" == "TRUE" && "$MODE" != "bam" ]]
     then
         if [[ ! -e "$IN_R1_RE_FASTQ" || ! -e "$IN_R2_RE_FASTQ" ]]
