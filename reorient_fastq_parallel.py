@@ -192,7 +192,7 @@ def reorient_fastq(fastq_interleaved, fastq_r1_out, fastq_r2_out, search_sequenc
                         batches = [(batch[i::cpus], search_sequences_r1, search_sequences_r2) for i in range(cpus)]
                         results = pool.map(process_and_write, batches)
                         for result in results:
-                            res, not_written_count, rejects, stats = result
+                            res, rejects, stats = result
                             for fwd, rev in res:
                                 SeqIO.write(fwd, f1, 'fastq')
                                 SeqIO.write(rev, f2, 'fastq')
