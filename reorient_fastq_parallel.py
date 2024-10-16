@@ -220,9 +220,16 @@ if not (os.path.exists(out_r1_re_fastq) and os.path.getsize(out_r1_re_fastq) > 0
     chunk_count = 0
     while os.path.exists(f"{interleaved_file}.{chunk_count}"):
         chunk_file = f"{interleaved_file}.{chunk_count}"
-        reorient_fastq(chunk_file, f"{out_r1_re_fastq}.{chunk_count}", f"{out_r2_re_fastq}.{chunk_count}", search_sequences_r1=search_sequences_r1, search_sequences_r2=search_sequences_r2, cpus=ncpu, batch_size=batch_size)
+        out_r1_chunk = f"{out_r1_re_fastq}.{chunk_count}"
+        out_r2_chunk = f"{out_r2_re_fastq}.{chunk_count}"
+        
+        if not (os.path.exists(out_r1_chunk) and os.path.getsize(out_r1_chunk) > 0) or \
+           not (os.path.exists(out_r2_chunk) and os.path.getsize(out_r2_chunk) > 0):
+            reorient_fastq(chunk_file, out_r1_chunk, out_r2_chunk, search_sequences_r1=search_sequences_r1, search_sequences_r2=search_sequences_r2, cpus=ncpu, batch_size=batch_size)
+        else:
+            print(f"Reoriented chunk files {out_r1_chunk} and {out_r2_chunk} already exist and are not empty.")
+        
         chunk_count += 1
-
     # Combine chunked output files into final output files
     with open(out_r1_re_fastq, 'w') as f1_out, open(out_r2_re_fastq, 'w') as f2_out:
         for i in range(chunk_count):
