@@ -14,9 +14,9 @@ SEARCH_REVCOMP=TRUE # fastq mode: when counting reads, search for reverse comple
 # fastq mode only
 reorient_fastq=TRUE # if PCR product is blunt end ligated and thus orientation of reads are randomly flipped
 ignore_r2=TRUE      # set FALSE if not using paired-end reads OR if R2 cannot cover the sgRNA sequence
-#trim5_lengths=120 # comma-separated numbers or leave empty for default (recommended)
-#keep_tmp=TRUE  # FALSE recommended
-#save_unmapped=TRUE # FALSE recommended
+trim5_lengths= # comma-separated numbers or leave empty for default (recommended)
+keep_tmp=FALSE  # FALSE recommended
+save_unmapped=FALSE # FALSE recommended
 
 # notes:
 #       save_unmapped TRUE is incompatible with trim5_lengths with more than 1 value
@@ -39,9 +39,8 @@ WORKING_DIR=/repo # path to code base (git repo)
 FASTQ_DIR=/input # put fastq files in FASTQ_DIR
                  # if metadata provides full path to fastq dir, this can be left blank
 
-METADATA_FILE=$WORKING_DIR/sample_metadata.txt # tab delim table with 4 columns: library, sample, fastq_r1, fastrq_r2
-                                               # header is required; comments (lines beginning with #) are ignored
-                                               # NOTE: where R1 and R2 have multiple files use comma-separated list
+METADATA_FILE=$WORKING_DIR/sample_metadata.txt # see sample_metadata.txt and sample_metadata.yaml in examples/
+                                               # for valid metadata files
 
 OUTPUT_DIR=/output # this dir must exist. if using docker, write permissions may need to be explicitly set
 
@@ -62,7 +61,7 @@ REFERENCES_DIR=$OUTPUT_DIR/references
 ##################################################################
 
 # these are added to the left and right of reference sgRNA sequences when building the fasta file used to make the bowtie2 index
-# recommendation is to leave these values blank
+# current recommendation: leave these values blank
 
 US_SEQ=""    # 5' sequence adjacent to sgRNA, recommended length >= 18 bases
 ### US_SEQ="taacttgctatttctagctctaaaac"    # 5' sequence adjacent to sgRNA, recommended length >= 18 bases
@@ -73,8 +72,8 @@ DS_SEQ=""       # 3' sequence adjacent to sgRNA, recommended length >= 18 bases
 ####   trimming (bam mode only)  ####
 #####################################
 
-TRIM_SEQ=tagccttattttaacttgctatttctagctctaaaac # trim sequence is 5' vector sequence adjacent to the sgRNA sequence
-                                               # recommended length > 18 bases, but it can be longer
+TRIM_SEQ=TAGCCTTATTTTAACTTGCTATTTCTAGCTCTAAAAC # TRIM SEQUENCE IS 5' VECTOR SEQUENCE ADJACENT TO THE SGRNA SEQUENCE
+											   # RECOMMENDED LENGTH > 18 BASES, BUT IT CAN BE LONGER
 
 #############################################################
 ####   fastq reorientation (if reorient_fastq is TRUE)   ####
@@ -85,41 +84,56 @@ TRIM_SEQ=tagccttattttaacttgctatttctagctctaaaac # trim sequence is 5' vector sequ
 # when using PCR primers, leave off first 3-4 bases on the ends of the amplicon
 # the code will not check reverse complement of these sequences!
 
-# upstream sequences define new R1
-upstream_seqs=(cttgctatttctagctctaaaac)
-# downstream sequences define new R2
-downstream_seqs=(cggtgtttcgtcctttccacaag)
+# expected sequences in R1
+r1_seqs=(GCTATTTCTAGCTCTAAAAC                 TCCCACTCCTTTCAAGA)
+#        ^^^ left adjacent to sgRNA           ^^^ PCR primer (rev) part (5' 5 bases removed)
+
+# expected sequences in R2
+r2_seqs=(GTTTTAGAGCTAGAAATAGC                 GAAAGGACGAAACACCG)
+#        ^^^ left adjacent to sgRNA (revcomp) ^^^ PCR primer (fwd) part (5' 5 bases removed)
 
 ##################################
 ####   sequencing libraries   ####
 ##################################
 
 # recommendation: do not modify this section if METADATA_FILE is formatted as described above
-# the 3 arrays created below are required
+# the 3 arrays created below (LIBRARIES, SAMPLE_NAMES, FASTQ_FILES) are required
 
-LIBRARIES=($(gawk 'BEGIN{FS="\t"; OFS=" "}(FNR>1 && $0!~/^#/){print $1}' $METADATA_FILE))
-SAMPLE_NAMES=($(gawk 'BEGIN{FS="\t"; OFS=" "}(FNR>1 && $0!~/^#/){print $2}' $METADATA_FILE))
-# fastq format is <R1_file1>,<R1_file2>;<R2_file1>,<R2_file2>
-FASTQ_FILES=($(gawk \
-	-v fq_path="$FASTQ_DIR" \
-		'BEGIN{FS="\t"; OFS=" "
-	}(FNR>1 && $0!~/^#/ && $0!~/^[[:space:]]*$/){
-		split($3,fq1s,",");
-		split($4,fq2s,",");
-		if(fq_path != ""){
-			fq_path_slash = fq_path "/"
-		}else{
-			fq_path_slash = ""
-		}
-		for(i=1;i<=length(fq1s);i++){
-			if(i==1){
-				new_fq1s = fq_path_slash fq1s[i];
-				new_fq2s = fq_path_slash fq2s[i];
+if ! command -v yq &> /dev/null || ! command -v jq &> /dev/null
+then
+	echo "Error: yq and jq are required but not installed." >&2
+	exit 1
+fi
+
+if [[ $METADATA_FILE =~ \.ya?ml$ ]]
+then
+	LIBRARIES=($(yq -e '.samples[].library' $METADATA_FILE))
+	SAMPLE_NAMES=($(yq -e '.samples[].sample' $METADATA_FILE))
+	FASTQ_FILES=($(yq -e '.samples[] | (.fastq_r1 | join(",")) + ";" + (.fastq_r2 | join(","))' $METADATA_FILE))
+else
+	LIBRARIES=($(gawk 'BEGIN{FS="\t"; OFS=" "}(FNR>1 && $0!~/^#/){print $1}' $METADATA_FILE))
+	SAMPLE_NAMES=($(gawk 'BEGIN{FS="\t"; OFS=" "}(FNR>1 && $0!~/^#/){print $2}' $METADATA_FILE))
+	# fastq format is <R1_file1>,<R1_file2>;<R2_file1>,<R2_file2>
+	FASTQ_FILES=($(gawk \
+		-v fq_path="$FASTQ_DIR" \
+			'BEGIN{FS="\t"; OFS=" "
+		}(FNR>1 && $0!~/^#/ && $0!~/^[[:space:]]*$/){
+			split($3,fq1s,",");
+			split($4,fq2s,",");
+			if(fq_path != ""){
+				fq_path_slash = fq_path "/"
 			}else{
-				new_fq1s = new_fq1s "," fq_path_slash fq1s[i];
-				new_fq2s = new_fq2s "," fq_path_slash fq2s[i];
+				fq_path_slash = ""
 			}
-		}
-		print new_fq1s ";" new_fq2s;
-	}' $METADATA_FILE))
-
+			for(i=1;i<=length(fq1s);i++){
+				if(i==1){
+					new_fq1s = fq_path_slash fq1s[i];
+					new_fq2s = fq_path_slash fq2s[i];
+				}else{
+					new_fq1s = new_fq1s "," fq_path_slash fq1s[i];
+					new_fq2s = new_fq2s "," fq_path_slash fq2s[i];
+				}
+			}
+			print new_fq1s ";" new_fq2s;
+		}' $METADATA_FILE))
+fi

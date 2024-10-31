@@ -1,0 +1,17 @@
+samples:
+  - library: library_id
+    sample: sample_name
+    fastq_r1: 
+      - library_id_1_1.fq.gz
+      - library_id_2_1.fq.gz
+    fastq_r2: 
+      - library_id_1_2.fq.gz
+      - library_id_2_2.fq.gz
+  - library: library2_id
+    sample: sample2_name
+    fastq_r1: 
+      - library2_id_1_1.fq.gz
+      - library2_id_2_1.fq.gz
+    fastq_r2: 
+      - library2_id_1_2.fq.gz
+      - library2_id_2_2.fq.gz

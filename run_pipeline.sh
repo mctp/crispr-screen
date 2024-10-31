@@ -255,10 +255,44 @@ do
         else
             echo "reoriented fastq files already exist, skipping reorientation."
         fi
-        # use reoriented fastq files
+    fi
+ 
+    # QC things
+
+    "R1:"
+    python $WORKING_DIR/find_backbone_sequence.py \
+        --in-fastq $IN_R1_FASTQ \
+        --out-fasta $OUTPUT_DIR/${LIBRARY}_R1.fa \
+        --out-alignment-clustalw $OUTPUT_DIR/${LIBRARY}_R1.clustalw.aln \
+        --sample-size 100
+    python length_to_pattern_frequencies.py
+    
+    "R2:"
+    python $WORKING_DIR/find_backbone_sequence.py \
+        --in-fastq $IN_R1_FASTQ \
+        --out-fasta $OUTPUT_DIR/${LIBRARY}_R2.fa \
+        --out-alignment-clustalw $OUTPUT_DIR/${LIBRARY}_R2.clustalw.aln \
+        --sample-size 100
+    "R1 reoriented:"
+    python $WORKING_DIR/find_backbone_sequence.py \
+        --in-fastq $IN_R1_RE_FASTQ \
+        --out-fasta $OUTPUT_DIR/${LIBRARY}_R1_reoriented.fa \
+        --out-alignment-clustalw $OUTPUT_DIR/${LIBRARY}_R1_reoriented.clustalw.aln \
+        --sample-size 100
+    "R2 reoriented:"
+    python $WORKING_DIR/find_backbone_sequence.py \
+        --in-fastq $IN_R2_RE_FASTQ \
+        --out-fasta $OUTPUT_DIR/${LIBRARY}_R2_reoriented.fa \
+        --out-alignment-clustalw $OUTPUT_DIR/${LIBRARY}_R2_reoriented.clustalw.aln \
+        --sample-size 100
+
+
+
+
+    if [[ "$reorient_fastq" == "TRUE" && "$MODE" != "bam" ]]
+    then
         IN_R1_FASTQ=$IN_R1_RE_FASTQ
         IN_R2_FASTQ=$IN_R2_RE_FASTQ
-
     fi
 
     echo
