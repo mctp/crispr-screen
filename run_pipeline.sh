@@ -33,6 +33,7 @@ fi
 SEARCH_REVCOMP=FALSE
 
 source config.sh
+source process_metadata.sh
 
 echo "search revcomp? $SEARCH_REVCOMP"
 
@@ -259,34 +260,61 @@ do
  
     # QC things
 
-    "R1:"
-    python $WORKING_DIR/find_backbone_sequence.py \
+    echo "R1:"
+    python $WORKING_DIR/find_top_sequences.py \
         --in-fastq $IN_R1_FASTQ \
         --out-fasta $OUTPUT_DIR/${LIBRARY}_R1.fa \
         --out-alignment-clustalw $OUTPUT_DIR/${LIBRARY}_R1.clustalw.aln \
-        --sample-size 100
-    python length_to_pattern_frequencies.py
+        --sample-size 100 \
+    | tee $OUTPUT_DIR/${LIBRARY}_R1_top_seqs.txt
+    python distance_to_pattern_frequencies.py \
+        --in-fastq $IN_R1_FASTQ \
+        --pattern $LEN_PATTERN \
+        --nreads 10000 \
+        --max-tries 10 \
+    | tee $OUTPUT_DIR/${LIBRARY}_R1_distance_to_pattern_frequencies.txt
     
-    "R2:"
-    python $WORKING_DIR/find_backbone_sequence.py \
+    echo "R2:"
+    python $WORKING_DIR/find_top_sequences.py \
         --in-fastq $IN_R1_FASTQ \
         --out-fasta $OUTPUT_DIR/${LIBRARY}_R2.fa \
         --out-alignment-clustalw $OUTPUT_DIR/${LIBRARY}_R2.clustalw.aln \
-        --sample-size 100
-    "R1 reoriented:"
-    python $WORKING_DIR/find_backbone_sequence.py \
+        --sample-size 100 \
+    | tee $OUTPUT_DIR/${LIBRARY}_R2_top_seqs.txt
+    python distance_to_pattern_frequencies.py \
+        --in-fastq $IN_R2_FASTQ \
+        --pattern $LEN_PATTERN \
+        --nreads 10000 \
+        --max-tries 10 \
+    | tee $OUTPUT_DIR/${LIBRARY}_R2_distance_to_pattern_frequencies.txt
+
+    echo "R1 reoriented:"
+    python $WORKING_DIR/find_top_sequences.py \
         --in-fastq $IN_R1_RE_FASTQ \
         --out-fasta $OUTPUT_DIR/${LIBRARY}_R1_reoriented.fa \
         --out-alignment-clustalw $OUTPUT_DIR/${LIBRARY}_R1_reoriented.clustalw.aln \
-        --sample-size 100
-    "R2 reoriented:"
-    python $WORKING_DIR/find_backbone_sequence.py \
+        --sample-size 100 \
+    | tee $OUTPUT_DIR/${LIBRARY}_R1_reoriented_top_seqs.txt
+    python distance_to_pattern_frequencies.py \
+        --in-fastq $IN_R1_RE_FASTQ \
+        --pattern $LEN_PATTERN \
+        --nreads 10000 \
+        --max-tries 10 \
+    | tee $OUTPUT_DIR/${LIBRARY}_R1_reoriented_distance_to_pattern_frequencies.txt
+
+    echo "R2 reoriented:"
+    python $WORKING_DIR/find_top_sequences.py \
         --in-fastq $IN_R2_RE_FASTQ \
         --out-fasta $OUTPUT_DIR/${LIBRARY}_R2_reoriented.fa \
         --out-alignment-clustalw $OUTPUT_DIR/${LIBRARY}_R2_reoriented.clustalw.aln \
-        --sample-size 100
-
-
+        --sample-size 100 \
+    | tee $OUTPUT_DIR/${LIBRARY}_R2_reoriented_top_seqs.txt
+    python distance_to_pattern_frequencies.py \
+        --in-fastq $IN_R2_RE_FASTQ \
+        --pattern $LEN_PATTERN \
+        --nreads 10000 \
+        --max-tries 10 \
+    | tee $OUTPUT_DIR/${LIBRARY}_R2_reoriented_distance_to_pattern_frequencies.txt
 
 
     if [[ "$reorient_fastq" == "TRUE" && "$MODE" != "bam" ]]

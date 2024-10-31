@@ -44,6 +44,15 @@ METADATA_FILE=$WORKING_DIR/sample_metadata.txt # see sample_metadata.txt and sam
 
 OUTPUT_DIR=/output # this dir must exist. if using docker, write permissions may need to be explicitly set
 
+#########################
+####   cloud paths   ####
+#########################
+
+cloud_storage_command="gcloud storage" # e.g. 'gcloud storage' or 'gsutil'
+cloud_storage_ls_command="$cloud_storage_command ls" # e.g. 'gcloud storage' or 'gsutil'
+cloud_storage_cp_command="$cloud_storage_command cp" # e.g. 'gcloud storage' or 'gsutil'
+cloud_fastq_base_path="gs://mctp-fastq/*" # can include wildcard if cloud storage command can parse them, e.g. 'gs://my-fastq/*'
+
 ########################
 ####   references   ####
 ########################
@@ -92,48 +101,11 @@ r1_seqs=(GCTATTTCTAGCTCTAAAAC                 TCCCACTCCTTTCAAGA)
 r2_seqs=(GTTTTAGAGCTAGAAATAGC                 GAAAGGACGAAACACCG)
 #        ^^^ left adjacent to sgRNA (revcomp) ^^^ PCR primer (fwd) part (5' 5 bases removed)
 
-##################################
-####   sequencing libraries   ####
-##################################
+########################
+####   QC related   ####
+########################
 
-# recommendation: do not modify this section if METADATA_FILE is formatted as described above
-# the 3 arrays created below (LIBRARIES, SAMPLE_NAMES, FASTQ_FILES) are required
+# this sequence is used for distance-to-pattern assessment of reads
+LEN_PATTERN=AGTTACGCCAAGC
 
-if ! command -v yq &> /dev/null || ! command -v jq &> /dev/null
-then
-	echo "Error: yq and jq are required but not installed." >&2
-	exit 1
-fi
-
-if [[ $METADATA_FILE =~ \.ya?ml$ ]]
-then
-	LIBRARIES=($(yq -e '.samples[].library' $METADATA_FILE))
-	SAMPLE_NAMES=($(yq -e '.samples[].sample' $METADATA_FILE))
-	FASTQ_FILES=($(yq -e '.samples[] | (.fastq_r1 | join(",")) + ";" + (.fastq_r2 | join(","))' $METADATA_FILE))
-else
-	LIBRARIES=($(gawk 'BEGIN{FS="\t"; OFS=" "}(FNR>1 && $0!~/^#/){print $1}' $METADATA_FILE))
-	SAMPLE_NAMES=($(gawk 'BEGIN{FS="\t"; OFS=" "}(FNR>1 && $0!~/^#/){print $2}' $METADATA_FILE))
-	# fastq format is <R1_file1>,<R1_file2>;<R2_file1>,<R2_file2>
-	FASTQ_FILES=($(gawk \
-		-v fq_path="$FASTQ_DIR" \
-			'BEGIN{FS="\t"; OFS=" "
-		}(FNR>1 && $0!~/^#/ && $0!~/^[[:space:]]*$/){
-			split($3,fq1s,",");
-			split($4,fq2s,",");
-			if(fq_path != ""){
-				fq_path_slash = fq_path "/"
-			}else{
-				fq_path_slash = ""
-			}
-			for(i=1;i<=length(fq1s);i++){
-				if(i==1){
-					new_fq1s = fq_path_slash fq1s[i];
-					new_fq2s = fq_path_slash fq2s[i];
-				}else{
-					new_fq1s = new_fq1s "," fq_path_slash fq1s[i];
-					new_fq2s = new_fq2s "," fq_path_slash fq2s[i];
-				}
-			}
-			print new_fq1s ";" new_fq2s;
-		}' $METADATA_FILE))
-fi
+#------------------------------------------------#
