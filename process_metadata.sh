@@ -7,6 +7,11 @@
 # recommendation: do not modify this section if METADATA_FILE is formatted as described above
 # the 3 arrays created below (LIBRARIES, SAMPLE_NAMES, FASTQ_FILES) are required
 
+if [[ "$DOCKER_PATHS" == "TRUE" ]]
+then
+	FASTQ_DIR=$DOCKER_FASTQ_DIR
+fi
+
 if [[ $METADATA_FILE =~ \.ya?ml$ ]]
 then
 

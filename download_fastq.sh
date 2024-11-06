@@ -12,6 +12,14 @@ done
 
 # Source the configuration file
 source config.sh
+source process_metadata.sh
+
+if [[ "$DOCKER_PATHS" == "TRUE" ]]
+then
+    WORKING_DIR=$DOCKER_WORKING_DIR
+    FASTQ_DIR=$DOCKER_FASTQ_DIR
+    OUTPUT_DIR=$DOCKER_OUTPUT_DIR
+fi
 
 echo "downloading using: $cloud_storage_command"
 echo "from base path: $cloud_fastq_base_path"

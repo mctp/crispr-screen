@@ -4,7 +4,6 @@
 ##################################################
 #------------------------------------------------#
 
-
 MODE=fastq # fastq (preferred), bam, grep (experimentation only)
 
 SEARCH_REVCOMP=TRUE # fastq mode: when counting reads, search for reverse complement of sgrna sequence
@@ -32,17 +31,24 @@ NCPU=32
 ####   paths   ####
 ###################
 
-# NOTE: when running in docker, these are relative to docker container, not host
+DOCKER_PATHS=TRUE # TRUE if paths are relative to docker container, FALSE if paths are relative to host
+skip_qc=FALSE # TRUE if QC has already been run and you want to skip it
 
-WORKING_DIR=/repo # path to code base (git repo)
+# path to code base (this repo)
+WORKING_DIR=.
+DOCKER_WORKING_DIR=/repo
 
-FASTQ_DIR=/input # put fastq files in FASTQ_DIR
-                 # if metadata provides full path to fastq dir, this can be left blank
+# put fastq files in FASTQ_DIR
+# if metadata provides full path to fastq dir, this can be left blank
+FASTQ_DIR=input
+DOCKER_FASTQ_DIR=/input
+
+OUTPUT_DIR=output # this dir must exist. if using docker, write permissions may need to be explicitly set
+DOCKER_OUTPUT_DIR=/output # this dir must exist. if using docker, write permissions may need to be explicitly set
 
 METADATA_FILE=$WORKING_DIR/sample_metadata.txt # see sample_metadata.txt and sample_metadata.yaml in examples/
                                                # for valid metadata files
 
-OUTPUT_DIR=/output # this dir must exist. if using docker, write permissions may need to be explicitly set
 
 #########################
 ####   cloud paths   ####
@@ -89,7 +95,7 @@ TRIM_SEQ=TAGCCTTATTTTAACTTGCTATTTCTAGCTCTAAAAC # TRIM SEQUENCE IS 5' VECTOR SEQU
 #############################################################
 
 # sequences are searched for in order of appearance in the arrays, R1 first and then R2
-# recommendation is to select sequence adjacent to sgRNA and/or PCR primers 
+# recommendation is to select sequence adjacent to sgRNA and/or PCR primers
 # when using PCR primers, leave off first 3-4 bases on the ends of the amplicon
 # the code will not check reverse complement of these sequences!
 
@@ -107,5 +113,3 @@ r2_seqs=(GTTTTAGAGCTAGAAATAGC                 GAAAGGACGAAACACCG)
 
 # this sequence is used for distance-to-pattern assessment of reads
 LEN_PATTERN=AGTTACGCCAAGC
-
-#------------------------------------------------#

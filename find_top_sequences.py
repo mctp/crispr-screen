@@ -16,18 +16,22 @@ parser.add_argument("--out-fasta", type=str, help="Output FASTA file")
 parser.add_argument("--out-alignment-clustalw", type=str, help="Output alignment file for ClustalW")
 parser.add_argument("--sample-size", type=int, default=10, help="Number of sequences to sample")
 parser.add_argument("--skip-consensus", action="store_true", help="Skip ClustalW alignment and consensus generation. Use if ClustalW is not available.")
+parser.add_argument("--seed", type=int, help="Seed for random sampling")
 args = parser.parse_args()
 
 def is_gzipped(file_path):
     with open(file_path, 'rb') as f:
         return f.read(2) == b'\x1f\x8b'
 
-def sample_sequences(fastq_file, sample_size=10):
+def sample_sequences(fastq_file, sample_size=10, seed=None):
     sampled_fastq = "sampled.fastq"
     command = ["seqtk", "sample", fastq_file, str(sample_size)]
     
     if is_gzipped(fastq_file):
-        command.insert(2, "-z")  # Indicate that the input is gzipped
+        command.insert(2, "-z")
+
+    if seed is not None:
+        command.extend(["-s", str(seed)])
 
     result = subprocess.run(command, capture_output=True, text=True)
     if result.returncode != 0:
@@ -77,7 +81,7 @@ def determine_sequence_classes(sequences, threshold=0.9, min_fraction=0.1):
     
     return pruned_classes
 
-sampled_sequences = sample_sequences(args.in_fastq, sample_size=args.sample_size)
+sampled_sequences = sample_sequences(args.in_fastq, sample_size=args.sample_size, seed=args.seed)
 write_fasta(sampled_sequences, args.out_fasta)
 
 sequence_classes = determine_sequence_classes(sampled_sequences)
