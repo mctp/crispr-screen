@@ -8,14 +8,14 @@ def process_metadata(metadata_file, fastq_dir=""):
     if (metadata_file.endswith('.yml') or metadata_file.endswith('.yaml')):
         with open(metadata_file, 'r') as f:
             data = yaml.safe_load(f)
-        libraries = [sample['library'] for sample in data['samples']]
-        sample_names = [sample['sample'] for sample in data['samples']]
+        libraries = [sample['library'] for sample in data['samples'] if not sample['sample'].startswith('#')]
+        sample_names = [sample['sample'] for sample in data['samples'] if not sample['sample'].startswith('#')]
         fastq_files = [
             ",".join(sample['fastq_r1']) + ";" + ",".join(sample['fastq_r2'])
-            for sample in data['samples']
+            for sample in data['samples'] if not sample['sample'].startswith('#')
         ]
     else:
-        df = pd.read_csv(metadata_file, delimiter='\t')  # Specify the delimiter
+        df = pd.read_csv(metadata_file, delimiter='\t', comment='#')  # Specify the delimiter and ignore commented lines
         sample_names = df.iloc[:, 1].tolist()
         fastq_files = []
 

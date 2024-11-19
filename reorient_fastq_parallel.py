@@ -26,6 +26,23 @@ def parse_args():
 
 args = parse_args()
 
+# Check if input FASTQ files exist and are valid
+def check_fastq_file(file_path):
+    if not os.path.exists(file_path):
+        raise FileNotFoundError(f"File {file_path} does not exist.")
+    if os.path.getsize(file_path) == 0:
+        raise ValueError(f"File {file_path} is empty.")
+    try:
+        with gzip.open(file_path, "rt") as handle:
+            SeqIO.parse(handle, "fastq")
+    except Exception as e:
+        raise ValueError(f"File {file_path} is not a valid FASTQ file: {e}")
+
+print(f"Checking input FASTQ file {args.in_fastq_r1}")
+check_fastq_file(args.in_fastq_r1)
+print(f"Checking input FASTQ file {args.in_fastq_r2}")
+check_fastq_file(args.in_fastq_r2)
+
 ncpu = args.cpus
 batch_size = args.batch_size
 nreads = args.nreads

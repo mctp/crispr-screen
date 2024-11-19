@@ -78,7 +78,7 @@ if (experiment_name != "") {
     experiment_prefix <- paste0(experiment_name, "_")
 }
 
-meta <- read.delim(config[['METADATA_FILE']], sep = "\t", header = TRUE)
+meta <- read.delim(config[['METADATA_FILE']], sep = "\t", header = TRUE, comment.char = "#")
 meta <- meta %>%
     mutate(sample_original = sample) %>%
     mutate(sample = gsub("-", ".", sample))
