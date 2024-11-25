@@ -8,7 +8,18 @@ import argparse
 import gzip
 import shutil
 from difflib import SequenceMatcher
-from termcolor import colored
+import os
+import joblib
+from collections import Counter
+import numpy as np
+from sklearn.naive_bayes import MultinomialNB
+from sklearn.model_selection import train_test_split
+
+try:
+    from termcolor import colored
+    termcolor_available = True
+except ImportError:
+    termcolor_available = False
 
 parser = argparse.ArgumentParser(description="Identify top sequences in fastq and generate a consensus.")
 parser.add_argument("--in-fastq", type=str, help="Input FASTQ file")
@@ -17,6 +28,9 @@ parser.add_argument("--out-alignment-clustalw", type=str, help="Output alignment
 parser.add_argument("--sample-size", type=int, default=10, help="Number of sequences to sample")
 parser.add_argument("--skip-consensus", action="store_true", help="Skip ClustalW alignment and consensus generation. Use if ClustalW is not available.")
 parser.add_argument("--seed", type=int, help="Seed for random sampling")
+parser.add_argument("--method-2", action="store_true", help="Use the second method to classify sequences")
+parser.add_argument('--model', help='Filename of trained model.')
+
 args = parser.parse_args()
 
 def is_gzipped(file_path):
@@ -69,31 +83,131 @@ def determine_sequence_classes(sequences, threshold=0.9, min_fraction=0.1):
     for seq in sequences:
         added = False
         for seq_class in sequence_classes:
-            if SequenceMatcher(None, seq_class[0].seq, seq.seq).ratio() >= threshold:
-                seq_class.append(seq)
+            if SequenceMatcher(None, seq_class[0][0].seq, seq.seq).ratio() >= threshold:
+                seq_class.append((seq, None))
                 added = True
                 break
         if not added:
-            sequence_classes.append([seq])
+            sequence_classes.append([(seq, None)])
     
     # Prune classes with low representation
     pruned_classes = [seq_class for seq_class in sequence_classes if len(seq_class) / total_sequences >= min_fraction]
     
     return pruned_classes
 
-sampled_sequences = sample_sequences(args.in_fastq, sample_size=args.sample_size, seed=args.seed)
-write_fasta(sampled_sequences, args.out_fasta)
+def extract_conserved_kmers(sequence, k=6, var_start=65, var_end=85):
+    left_kmers = [sequence[i:i+k] for i in range(var_start - k)]
+    right_kmers = [sequence[i:i+k] for i in range(var_end, len(sequence) - k + 1)]
+    return left_kmers + right_kmers
 
-sequence_classes = determine_sequence_classes(sampled_sequences)
+def create_feature_vector(sequence, top_kmers, var_start=65, var_end=85):
+    kmers = extract_conserved_kmers(str(sequence.seq), var_start=var_start, var_end=var_end)
+    return [kmers.count(kmer) for kmer in top_kmers]
+
+# Classification phase
+def load_model_and_classify(sequences, model_filename='dna_classifier.joblib', min_fraction=0.1):
+    # Load the model and top_kmers
+    loaded_data = joblib.load(model_filename)
+    clf = loaded_data['model']
+    if 'top_kmers' not in loaded_data:
+        raise KeyError("The loaded model data does not contain 'top_kmers'")
+    top_kmers = loaded_data['top_kmers']
+    confidence_threshold = loaded_data['confidence_threshold']
+    print(f"Confidence threshold: {confidence_threshold}")
+
+    # Create feature vectors for new sequences
+    X = [create_feature_vector(seq, top_kmers) for seq in sequences]
+
+    y_pred_proba = clf.predict_proba(X)
+    
+    # Get max probability for each prediction
+    max_proba = np.max(y_pred_proba, axis=1)
+    
+    # Classify
+    predictions = clf.predict(X)
+    
+    # Detect OOD samples
+    is_ood = max_proba < confidence_threshold
+    
+    # Group sequences by predicted class
+    sequence_classes = []
+    for seq, pred, ood in zip(sequences, predictions, is_ood):
+        added = False
+        for seq_class in sequence_classes:
+            if seq_class[0][1] == pred:
+                seq_class.append((seq, pred, ood))
+                added = True
+                break
+        if not added:
+            sequence_classes.append([(seq, pred, ood)])
+
+    return sequence_classes
+
+def assign_representative_sequences(sequence_classes):
+    representative_sequences = []
+    for seq_class in sequence_classes:
+        sequence_counts = {}
+        for item in seq_class:
+            seq = item[0]
+            seq_str = str(seq.seq)
+            if seq_str in sequence_counts:
+                sequence_counts[seq_str] += 1
+            else:
+                sequence_counts[seq_str] = 1
+        most_frequent_sequence = max(sequence_counts, key=sequence_counts.get)
+        representative_sequences.append(most_frequent_sequence)
+    return representative_sequences
+
+base_name, ext1 = os.path.splitext(args.in_fastq)
+if ext1 == ".gz":
+    base_name, ext2 = os.path.splitext(base_name)
+
+if not args.out_fasta:
+    out_fasta = base_name + ".fasta"
+else:
+    out_fasta = args.out_fasta
+
+if not args.out_alignment_clustalw:
+    out_alignment_clustalw = base_name + ".aln"
+else:
+    out_alignment_clustalw = args.out_alignment_clustalw
+
+sampled_sequences = sample_sequences(args.in_fastq, sample_size=args.sample_size, seed=args.seed)
+write_fasta(sampled_sequences, out_fasta)
+
+if args.method_2:
+    if args.model:
+        sequence_classes = load_model_and_classify(sampled_sequences, model_filename=args.model)
+    else:
+        sequence_classes = load_model_and_classify(sampled_sequences)
+    ood_sequences = [seq for seq_class in sequence_classes for seq, _, ood in seq_class if ood]
+    print(f"Number of OOD sequences: {len(ood_sequences)} ({len(ood_sequences) / len(sampled_sequences):.2%})")
+    filtered_sequence_classes = []
+    for seq_class in sequence_classes:
+        filtered_class = [seq for seq in seq_class if not seq[2]]
+        if filtered_class:
+            filtered_sequence_classes.append(filtered_class)
+    
+    print("OOD sequences (first 20):")
+    for ood_seq in ood_sequences[:20]:
+        print(ood_seq.seq)
+    original_sequence_classes = sequence_classes
+    sequence_classes = filtered_sequence_classes
+else:
+    sequence_classes = determine_sequence_classes(sampled_sequences)
+    original_sequence_classes = sequence_classes
+
+representative_sequences = assign_representative_sequences(sequence_classes)
 
 print(f"Number of sequence classes: {len(sequence_classes)}")
 for i, seq_class in enumerate(sequence_classes):
     print(f"Class {i+1}:")
-    print(f"Representative sequence: {seq_class[0].seq}")
+    representative_sequence = representative_sequences[i]
+    print(f"Representative sequence: {representative_sequence}")
     print(f"Number of sequences in class: {len(seq_class)} ({len(seq_class) / len(sampled_sequences):.2%})")
 
 if not args.skip_consensus:
-    clustalw_alignment = clustalw_alignment(args.out_fasta, args.out_alignment_clustalw)
+    clustalw_alignment = clustalw_alignment(out_fasta, out_alignment_clustalw)
     consensus = get_consensus(clustalw_alignment)
 
     if args.sample_size <= 10:
@@ -105,7 +219,7 @@ if not args.skip_consensus:
         print(clustalw_alignment)
 
     print("Consensus sequence:")
-    def color_consensus(consensus):
+    if termcolor_available:
         colored_consensus = ""
         for base in consensus:
             if base == 'A' or base == 'C' or base == 'T' or base == 'G':
@@ -114,8 +228,11 @@ if not args.skip_consensus:
                 colored_consensus += colored(base, 'red')
             else:
                 colored_consensus += colored(base, 'blue')
-        return colored_consensus
-
-    print(color_consensus(consensus))
+        print(colored_consensus)
+    else:
+        print(consensus)
 else:
     print("Consensus generation skipped.")
+
+print(f"FASTA file path: {out_fasta}")
+print(f"Alignment file path: {out_alignment_clustalw}")
