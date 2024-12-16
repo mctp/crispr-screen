@@ -132,14 +132,24 @@ do
     INTERLEAVED_FASTQ=$OUTPUT_DIR/${LIBRARY}_combined_interleaved.fq.gz
 
     # merge reads, even if only one file
-    if [[ ! -e "$IN_R1_FASTQ" ]]
+    if [[ -e "$IN_R1_FASTQ" && ! -s "$IN_R1_FASTQ" ]]
+    then
+        echo "Warning: $IN_R1_FASTQ exists but is empty.  Overwriting."
+    fi
+
+    if [[ ! -e "$IN_R1_FASTQ" || ! -s "$IN_R1_FASTQ" ]]
     then
         echo "merging $R1_space"
         echo "to: $IN_R1_FASTQ"
         cat $R1_space > $IN_R1_FASTQ
     fi
 
-    if [[ ! -e "$IN_R2_FASTQ" ]]
+    if [[ -e "$IN_R2_FASTQ" && ! -s "$IN_R2_FASTQ" ]]
+    then
+        echo "Warning: $IN_R2_FASTQ exists but is empty. Overwriting."
+    fi
+
+    if [[ ! -e "$IN_R2_FASTQ" || ! -s "$IN_R2_FASTQ" ]]
     then
         echo "merging $R2_space"
         echo "to: $IN_R2_FASTQ"
@@ -176,8 +186,7 @@ do
     then
         echo "Computing read count for $LIBRARY"
         NEW_READ_COUNT=$(zcat "$IN_R1_FASTQ" | wc -l | gawk '{print $1/4}')
-        echo "was:  $READ_COUNT"
-        echo "now:  $NEW_READ_COUNT"
+        echo "read count:  $NEW_READ_COUNT"
         # Report the read count in the fastq_stats file
         if [[ "$READ_COUNT" != "-1" ]]
         then

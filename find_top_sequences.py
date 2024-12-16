@@ -26,6 +26,7 @@ parser.add_argument("--in-fastq", type=str, help="Input FASTQ file")
 parser.add_argument("--out-fasta", type=str, help="Output FASTA file")
 parser.add_argument("--out-alignment-clustalw", type=str, help="Output alignment file for ClustalW")
 parser.add_argument("--sample-size", type=int, default=10, help="Number of sequences to sample")
+parser.add_argument("--msa-sample-size", type=int, default=200, help="Number of sequences to sample for MSA.")
 parser.add_argument("--skip-consensus", action="store_true", help="Skip ClustalW alignment and consensus generation. Use if ClustalW is not available.")
 parser.add_argument("--seed", type=int, help="Seed for random sampling")
 parser.add_argument("--method-2", action="store_true", help="Use the second method to classify sequences")
@@ -206,7 +207,10 @@ for i, seq_class in enumerate(sequence_classes):
     print(f"Representative sequence: {representative_sequence}")
     print(f"Number of sequences in class: {len(seq_class)} ({len(seq_class) / len(sampled_sequences):.2%})")
 
+
 if not args.skip_consensus:
+    sampled_sequences_for_msa = sampled_sequences[:args.msa_sample_size]
+    write_fasta(sampled_sequences_for_msa, out_fasta)
     clustalw_alignment = clustalw_alignment(out_fasta, out_alignment_clustalw)
     consensus = get_consensus(clustalw_alignment)
 
