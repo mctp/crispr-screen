@@ -32,8 +32,21 @@ then
 fi
 SEARCH_REVCOMP=FALSE
 
-source config.sh
+source config.sh                # load config variables         
 source process_metadata.sh
+
+if [[ "$DOCKER_PATHS" != "" ]]
+then
+    echo "Warning: DOCKER_PATHS is set to $DOCKER_PATHS in config.sh, overriding any autodetection of docker.  This could cause problems."
+fi
+
+# detect if we are running in a docker container
+if [[ -f /.dockerenv ]]
+then
+    DOCKER_PATHS=TRUE
+else
+    DOCKER_PATHS=FALSE
+fi
 
 if [[ "$DOCKER_PATHS" == "TRUE" ]]
 then
@@ -42,7 +55,7 @@ then
     OUTPUT_DIR=$DOCKER_OUTPUT_DIR
 fi
 
-echo "search revcomp? $SEARCH_REVCOMP"
+echo "search revcomp: $SEARCH_REVCOMP"
 
 if [[ "$OUTPUT_DIR" == "" || ${#LIBRARIES[@]} -lt 1 ]]
 then
@@ -60,6 +73,18 @@ force_references=FALSE
 while [ "$#" -gt 0 ]
 do
     case "$1" in
+        --skip-qc )
+           skip_qc=TRUE
+           shift 1
+           ;;
+        --skip-analysis )
+           skip_analysis=TRUE
+           shift 1
+           ;;
+        --analysis-only )
+            analysis_only=TRUE
+            shift 1
+            ;;
         --skip-references )
            skip_references=TRUE
            shift 1
@@ -84,6 +109,13 @@ do
     esac
 done
 
+if [[ "$analysis_only" == "TRUE" ]]
+then
+    echo "Running analysis section only."
+    source mageck_analysis.sh --mode $MODE
+    exit
+fi
+
 if [[ "$MODE" == "bam" ]]
 then
     # skip ref/index if explicitly set or if output files exist with a test
@@ -107,7 +139,6 @@ then
     fi
 fi
 
-
 for i in ${!LIBRARIES[@]}
 do
     LIBRARY="${LIBRARIES[$i]}"
@@ -124,6 +155,17 @@ do
 
     R1_space=$(echo "$IN_R1_FASTQ" | tr ',' ' ')
     R2_space=$(echo "$IN_R2_FASTQ" | tr ',' ' ')
+
+    # Check if all of the R1 or R2 files exist
+    for file in $R1_space $R2_space
+    do
+        if [[ ! -e "$file" || ! -s "$IN_R1_FASTQ" ]]
+        then
+            echo "Warning: $file does not exist or is empty. Skipping library $LIBRARY."
+            # continue to the next library
+            continue 2
+        fi
+    done
 
     IN_R1_FASTQ=$OUTPUT_DIR/${LIBRARY}_combined_R1.fq.gz
     IN_R2_FASTQ=$OUTPUT_DIR/${LIBRARY}_combined_R2.fq.gz
@@ -347,6 +389,7 @@ do
 
     if [[ "$reorient_fastq" == "TRUE" && "$MODE" != "bam" ]]
     then
+        # use reoriented fastq files
         IN_R1_FASTQ=$IN_R1_RE_FASTQ
         IN_R2_FASTQ=$IN_R2_RE_FASTQ
     fi
@@ -373,3 +416,20 @@ do
         source count_mageck.sh --mode $MODE
     fi
 done
+
+echo
+echo "building count and cpm matrix files..."
+python cpm_matrix.py --config config.sh
+echo
+echo "plotting count distribution histograms..."
+Rscript count_distribution_histograms.R
+echo
+
+if [[ "$skip_analysis" == "TRUE" ]]
+then
+    echo "Skipping analysis section."
+else
+    echo "running mageck analysis..."
+    source mageck_analysis.sh --mode $MODE
+fi
+

@@ -16,6 +16,7 @@ def process_metadata(metadata_file, fastq_dir=""):
         ]
     else:
         df = pd.read_csv(metadata_file, delimiter='\t', comment='#')  # Specify the delimiter and ignore commented lines
+        libraries = df.iloc[:, 0].tolist()
         sample_names = df.iloc[:, 1].tolist()
         fastq_files = []
 
