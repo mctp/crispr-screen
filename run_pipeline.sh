@@ -159,7 +159,7 @@ do
     # Check if all of the R1 or R2 files exist
     for file in $R1_space $R2_space
     do
-        if [[ ! -e "$file" || ! -s "$IN_R1_FASTQ" ]]
+        if [[ ! -e "$file" || ! -s "$file" ]]
         then
             echo "Warning: $file does not exist or is empty. Skipping library $LIBRARY."
             # continue to the next library
@@ -173,30 +173,13 @@ do
     IN_R2_RE_FASTQ=$OUTPUT_DIR/${LIBRARY}_combined_R2.reoriented.fq.gz
     INTERLEAVED_FASTQ=$OUTPUT_DIR/${LIBRARY}_combined_interleaved.fq.gz
 
-    # merge reads, even if only one file
-    if [[ -e "$IN_R1_FASTQ" && ! -s "$IN_R1_FASTQ" ]]
-    then
-        echo "Warning: $IN_R1_FASTQ exists but is empty.  Overwriting."
-    fi
+    echo "merging $R1_space"
+    echo "to: $IN_R1_FASTQ"
+    cat $R1_space > $IN_R1_FASTQ
 
-    if [[ ! -e "$IN_R1_FASTQ" || ! -s "$IN_R1_FASTQ" ]]
-    then
-        echo "merging $R1_space"
-        echo "to: $IN_R1_FASTQ"
-        cat $R1_space > $IN_R1_FASTQ
-    fi
-
-    if [[ -e "$IN_R2_FASTQ" && ! -s "$IN_R2_FASTQ" ]]
-    then
-        echo "Warning: $IN_R2_FASTQ exists but is empty. Overwriting."
-    fi
-
-    if [[ ! -e "$IN_R2_FASTQ" || ! -s "$IN_R2_FASTQ" ]]
-    then
-        echo "merging $R2_space"
-        echo "to: $IN_R2_FASTQ"
-        cat $R2_space > $IN_R2_FASTQ
-    fi
+    echo "merging $R2_space"
+    echo "to: $IN_R2_FASTQ"
+    cat $R2_space > $IN_R2_FASTQ
 
     FASTQ_STATS_FILE="$OUTPUT_DIR/fastq_stats.txt"
 
