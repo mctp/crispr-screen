@@ -1,13 +1,4 @@
-import random
-import subprocess
-from Bio import SeqIO
-from Bio import Align
-from Bio.Align import AlignInfo
-from Bio import motifs
 import argparse
-import gzip
-import shutil
-from difflib import SequenceMatcher
 import os
 import joblib
 from collections import Counter

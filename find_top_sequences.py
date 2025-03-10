@@ -1,19 +1,25 @@
-import random
 import subprocess
 from Bio import SeqIO
 from Bio import Align
-from Bio.Align import AlignInfo
 from Bio import motifs
 import argparse
-import gzip
-import shutil
 from difflib import SequenceMatcher
 import os
 import joblib
-from collections import Counter
 import numpy as np
-from sklearn.naive_bayes import MultinomialNB
-from sklearn.model_selection import train_test_split
+import logging
+import sys
+
+logging.basicConfig(
+    level=logging.INFO,
+    format="[{asctime}] [{levelname}] {message}",
+    style="{",
+    datefmt="%Y-%m-%d %H:%M:%S",
+    handlers=[
+        logging.StreamHandler(sys.stdout),
+        logging.FileHandler("output/find_top_sequences.log")
+    ]
+)
 
 try:
     from termcolor import colored
@@ -25,7 +31,7 @@ parser = argparse.ArgumentParser(description="Identify top sequences in fastq an
 parser.add_argument("--in-fastq", type=str, help="Input FASTQ file")
 parser.add_argument("--out-fasta", type=str, help="Output FASTA file")
 parser.add_argument("--out-alignment-clustalw", type=str, help="Output alignment file for ClustalW")
-parser.add_argument("--sample-size", type=int, default=10, help="Number of sequences to sample")
+parser.add_argument("--sample-size", type=int, default=1000, help="Number of sequences to sample")
 parser.add_argument("--msa-sample-size", type=int, default=200, help="Number of sequences to sample for MSA.")
 parser.add_argument("--skip-consensus", action="store_true", help="Skip ClustalW alignment and consensus generation. Use if ClustalW is not available.")
 parser.add_argument("--seed", type=int, help="Seed for random sampling")
@@ -114,7 +120,7 @@ def load_model_and_classify(sequences, model_filename='dna_classifier.joblib', m
         raise KeyError("The loaded model data does not contain 'top_kmers'")
     top_kmers = loaded_data['top_kmers']
     confidence_threshold = loaded_data['confidence_threshold']
-    print(f"Confidence threshold: {confidence_threshold}")
+    logging.info(f"Confidence threshold: {confidence_threshold}")
 
     # Create feature vectors for new sequences
     X = [create_feature_vector(seq, top_kmers) for seq in sequences]
@@ -182,16 +188,16 @@ if args.method_2:
     else:
         sequence_classes = load_model_and_classify(sampled_sequences)
     ood_sequences = [seq for seq_class in sequence_classes for seq, _, ood in seq_class if ood]
-    print(f"Number of OOD sequences: {len(ood_sequences)} ({len(ood_sequences) / len(sampled_sequences):.2%})")
+    logging.info(f"Number of OOD sequences: {len(ood_sequences)} ({len(ood_sequences) / len(sampled_sequences):.2%})")
     filtered_sequence_classes = []
     for seq_class in sequence_classes:
         filtered_class = [seq for seq in seq_class if not seq[2]]
         if filtered_class:
             filtered_sequence_classes.append(filtered_class)
     
-    print("OOD sequences (first 20):")
+    logging.info("OOD sequences (first 20):")
     for ood_seq in ood_sequences[:20]:
-        print(ood_seq.seq)
+        logging.info(ood_seq.seq)
     original_sequence_classes = sequence_classes
     sequence_classes = filtered_sequence_classes
 else:
@@ -200,12 +206,12 @@ else:
 
 representative_sequences = assign_representative_sequences(sequence_classes)
 
-print(f"Number of sequence classes: {len(sequence_classes)}")
+logging.info(f"Number of sequence classes: {len(sequence_classes)}")
 for i, seq_class in enumerate(sequence_classes):
-    print(f"Class {i+1}:")
+    logging.info(f"Class {i+1}:")
     representative_sequence = representative_sequences[i]
-    print(f"Representative sequence: {representative_sequence}")
-    print(f"Number of sequences in class: {len(seq_class)} ({len(seq_class) / len(sampled_sequences):.2%})")
+    logging.info(f"Representative sequence: {representative_sequence}")
+    logging.info(f"Number of sequences in class: {len(seq_class)} ({len(seq_class) / len(sampled_sequences):.2%})")
 
 
 if not args.skip_consensus:
@@ -215,14 +221,14 @@ if not args.skip_consensus:
     consensus = get_consensus(clustalw_alignment)
 
     if args.sample_size <= 10:
-        print("Sampled sequences:")
+        logging.info("Sampled sequences:")
         for sequence in sampled_sequences:
-            print(sequence.seq)
+            logging.info(sequence.seq)
 
-        print("ClustalW2 Alignment:")
-        print(clustalw_alignment)
+        logging.info("ClustalW2 Alignment:")
+        logging.info(clustalw_alignment)
 
-    print("Consensus sequence:")
+    logging.info("Consensus sequence:")
     if termcolor_available:
         colored_consensus = ""
         for base in consensus:
@@ -232,11 +238,11 @@ if not args.skip_consensus:
                 colored_consensus += colored(base, 'red')
             else:
                 colored_consensus += colored(base, 'blue')
-        print(colored_consensus)
+        logging.info(colored_consensus)
     else:
-        print(consensus)
+        logging.info(consensus)
 else:
-    print("Consensus generation skipped.")
+    logging.info("Consensus generation skipped.")
 
-print(f"FASTA file path: {out_fasta}")
-print(f"Alignment file path: {out_alignment_clustalw}")
+logging.info(f"FASTA file path: {out_fasta}")
+logging.info(f"Alignment file path: {out_alignment_clustalw}")

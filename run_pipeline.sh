@@ -69,6 +69,7 @@ reformat_sgrna_list=FALSE # mostly not used any more, so default is FALSE
 generate_references_cmd_opts=
 skip_references=FALSE
 force_references=FALSE
+skip_fastq_processing=FALSE
 
 while [ "$#" -gt 0 ]
 do
@@ -85,6 +86,10 @@ do
             analysis_only=TRUE
             shift 1
             ;;
+        --skip-fastq-processing )
+           skip_fastq_processing=TRUE
+           shift 1
+           ;;       
         --skip-references )
            skip_references=TRUE
            shift 1
@@ -156,16 +161,19 @@ do
     R1_space=$(echo "$IN_R1_FASTQ" | tr ',' ' ')
     R2_space=$(echo "$IN_R2_FASTQ" | tr ',' ' ')
 
-    # Check if all of the R1 or R2 files exist
-    for file in $R1_space $R2_space
-    do
-        if [[ ! -e "$file" || ! -s "$file" ]]
-        then
-            echo "Warning: $file does not exist or is empty. Skipping library $LIBRARY."
-            # continue to the next library
-            continue 2
-        fi
-    done
+    if [[ ! "$skip_fastq_processing" == "TRUE" ]]
+    then
+        # Check if all of the R1 or R2 files exist
+        for file in $R1_space $R2_space
+        do
+            if [[ ! -e "$file" || ! -s "$file" ]]
+            then
+                echo "Warning: $file does not exist or is empty. Skipping library $LIBRARY."
+                # continue to the next library
+                continue 2
+            fi
+        done
+    fi
 
     IN_R1_FASTQ=$OUTPUT_DIR/${LIBRARY}_combined_R1.fq.gz
     IN_R2_FASTQ=$OUTPUT_DIR/${LIBRARY}_combined_R2.fq.gz
@@ -173,169 +181,176 @@ do
     IN_R2_RE_FASTQ=$OUTPUT_DIR/${LIBRARY}_combined_R2.reoriented.fq.gz
     INTERLEAVED_FASTQ=$OUTPUT_DIR/${LIBRARY}_combined_interleaved.fq.gz
 
-    echo "merging $R1_space"
-    echo "to: $IN_R1_FASTQ"
-    cat $R1_space > $IN_R1_FASTQ
-
-    echo "merging $R2_space"
-    echo "to: $IN_R2_FASTQ"
-    cat $R2_space > $IN_R2_FASTQ
-
-    FASTQ_STATS_FILE="$OUTPUT_DIR/fastq_stats.txt"
-
-    if [[ ! -e "$FASTQ_STATS_FILE" ]]; then
-        echo -e "library\tread_count" > "$FASTQ_STATS_FILE"
-    fi
-
-    # Check if the library already has a read count
-    READ_COUNT=$(gawk \
-        -v lib="$LIBRARY" \
-        'BEGIN{
-            FS=OFS="\t"
-        }{
-            if(FNR==1){
-                for(i=1; i<=NF; i++){
-                    header[$i] = i
-                }
-            }else{
-                if($header["library"] == lib){
-                    print $header["read_count"]
-                    exit
-                }
-            }
-        }END{
-            print -1
-        }' "$FASTQ_STATS_FILE")
-
-    if [[ -z "$READ_COUNT" || "$READ_COUNT" -le 0 ]]
+    if [[ ! "$skip_fastq_processing" == "TRUE" ]]
     then
-        echo "Computing read count for $LIBRARY"
-        NEW_READ_COUNT=$(zcat "$IN_R1_FASTQ" | wc -l | gawk '{print $1/4}')
-        echo "read count:  $NEW_READ_COUNT"
-        # Report the read count in the fastq_stats file
-        if [[ "$READ_COUNT" != "-1" ]]
+        echo "merging $R1_space"
+        echo "to: $IN_R1_FASTQ"
+        cat $R1_space > $IN_R1_FASTQ
+
+        echo "merging $R2_space"
+        echo "to: $IN_R2_FASTQ"
+        cat $R2_space > $IN_R2_FASTQ
+
+        FASTQ_STATS_FILE="$OUTPUT_DIR/fastq_stats.txt"
+
+        if [[ ! -e "$FASTQ_STATS_FILE" ]]; then
+            echo -e "library\tread_count" > "$FASTQ_STATS_FILE"
+        fi
+
+        # Check if the library already has a read count
+        READ_COUNT=$(gawk \
+            -v lib="$LIBRARY" \
+            'BEGIN{
+                FS=OFS="\t"
+            }{
+                if(FNR==1){
+                    for(i=1; i<=NF; i++){
+                        header[$i] = i
+                    }
+                }else{
+                    if($header["library"] == lib){
+                        print $header["read_count"]
+                        exit
+                    }
+                }
+            }END{
+                print -1
+            }' "$FASTQ_STATS_FILE")
+
+        if [[ -z "$READ_COUNT" || "$READ_COUNT" -le 0 ]]
         then
-            # Update existing entry
-            gawk \
-                -v lib="$LIBRARY" \
-                -v count="$NEW_READ_COUNT" \
-                'BEGIN{
-                    FS=OFS="\t"
-                }{
-                    if(FNR==1){
-                        for(i=1; i<=NF; i++){
-                            header[$i] = i
-                        }
-                    }else{
-                        if($header["library"] == lib){
-                            $header["read_count"] = count
-                        }
-                    }
-                    print $0
-                }' "$FASTQ_STATS_FILE" \
-            > "$FASTQ_STATS_FILE.tmp" && mv "$FASTQ_STATS_FILE.tmp" "$FASTQ_STATS_FILE"
-        else
-            # Add new entry
-            gawk \
-                -v lib="$LIBRARY" \
-                -v count="$NEW_READ_COUNT" \
-                'BEGIN{
-                    FS=OFS="\t"
-                }{
-                    if(FNR==1){
-                        # find "library" and "read_count" columns
-                        for(i=1; i<=NF; i++){
-                            header[$i] = i
-                        }
-                    }
-                    print $0
-                }END{
-                    for(i=1;i<=NF;i++){
-                        if(i == header["library"]){
-                            if(i==1){
-                                printf lib
-                            }else{
-                                printf OFS lib
-                            }
-                        }else if(i == header["read_count"]){
-                            if(i==1){
-                                printf count
-                            }else{
-                                printf OFS count
+            echo "Computing read count for $LIBRARY"
+            NEW_READ_COUNT=$(zcat "$IN_R1_FASTQ" | wc -l | gawk '{print $1/4}')
+            echo "read count:  $NEW_READ_COUNT"
+            # Report the read count in the fastq_stats file
+            if [[ "$READ_COUNT" != "-1" ]]
+            then
+                # Update existing entry
+                gawk \
+                    -v lib="$LIBRARY" \
+                    -v count="$NEW_READ_COUNT" \
+                    'BEGIN{
+                        FS=OFS="\t"
+                    }{
+                        if(FNR==1){
+                            for(i=1; i<=NF; i++){
+                                header[$i] = i
                             }
                         }else{
-                            if(i==1){
-                                printf $i
-                            }else{
-                                printf OFS $i
+                            if($header["library"] == lib){
+                                $header["read_count"] = count
                             }
                         }
-                    }
-                    printf ORS
-                }' "$FASTQ_STATS_FILE" \
-            > "$FASTQ_STATS_FILE.tmp" && mv "$FASTQ_STATS_FILE.tmp" "$FASTQ_STATS_FILE"
+                        print $0
+                    }' "$FASTQ_STATS_FILE" \
+                > "$FASTQ_STATS_FILE.tmp" && mv "$FASTQ_STATS_FILE.tmp" "$FASTQ_STATS_FILE"
+            else
+                # Add new entry
+                gawk \
+                    -v lib="$LIBRARY" \
+                    -v count="$NEW_READ_COUNT" \
+                    'BEGIN{
+                        FS=OFS="\t"
+                    }{
+                        if(FNR==1){
+                            # find "library" and "read_count" columns
+                            for(i=1; i<=NF; i++){
+                                header[$i] = i
+                            }
+                        }
+                        print $0
+                    }END{
+                        for(i=1;i<=NF;i++){
+                            if(i == header["library"]){
+                                if(i==1){
+                                    printf lib
+                                }else{
+                                    printf OFS lib
+                                }
+                            }else if(i == header["read_count"]){
+                                if(i==1){
+                                    printf count
+                                }else{
+                                    printf OFS count
+                                }
+                            }else{
+                                if(i==1){
+                                    printf $i
+                                }else{
+                                    printf OFS $i
+                                }
+                            }
+                        }
+                        printf ORS
+                    }' "$FASTQ_STATS_FILE" \
+                > "$FASTQ_STATS_FILE.tmp" && mv "$FASTQ_STATS_FILE.tmp" "$FASTQ_STATS_FILE"
+            fi
         fi
-    fi
 
-    if [[ "$reorient_fastq" == "TRUE" && "$MODE" != "bam" ]]
-    then
-        if [[ ! -e "$IN_R1_RE_FASTQ" || ! -e "$IN_R2_RE_FASTQ" ]]
+        if [[ "$reorient_fastq" == "TRUE" && "$MODE" != "bam" ]]
         then
-            echo "reorienting fastq files (this will take a long time)..."
-            
-            time python reorient_fastq_parallel.py \
-                --sequences-r1 $(IFS=,; echo "${r1_seqs[*]}") \
-                --sequences-r2 $(IFS=,; echo "${r2_seqs[*]}") \
-                --cpus $NCPU \
-                --batch-size 1000 \
-                --in-fastq-r1 $IN_R1_FASTQ \
-                --in-fastq-r2 $IN_R2_FASTQ \
-                --out-fastq-r1 $IN_R1_RE_FASTQ \
-                --out-fastq-r2 $IN_R2_RE_FASTQ \
-                --file-interleaved-gz $INTERLEAVED_FASTQ
+            if [[ ! -e "$IN_R1_RE_FASTQ" || ! -e "$IN_R2_RE_FASTQ" ]]
+            then
+                echo "reorienting fastq files (this will take a long time)..."
+                
+                time python reorient_fastq_parallel.py \
+                    --sequences-r1 $(IFS=,; echo "${r1_seqs[*]}") \
+                    --sequences-r2 $(IFS=,; echo "${r2_seqs[*]}") \
+                    --cpus $NCPU \
+                    --batch-size 1000 \
+                    --in-fastq-r1 $IN_R1_FASTQ \
+                    --in-fastq-r2 $IN_R2_FASTQ \
+                    --out-fastq-r1 $IN_R1_RE_FASTQ \
+                    --out-fastq-r2 $IN_R2_RE_FASTQ \
+                    --file-interleaved-gz $INTERLEAVED_FASTQ
 
-        else
-            echo "reoriented fastq files already exist, skipping reorientation."
+            else
+                echo "reoriented fastq files already exist, skipping reorientation."
+            fi
         fi
+
     fi
- 
     # QC things
 
     if [[ "$skip_qc" == "TRUE" ]]
     then
         echo    "WARNING: skipping QC section."    
     else
-        echo "--------"
-        echo "   R1"
-        echo "--------"
-        python $WORKING_DIR/find_top_sequences.py \
-            --in-fastq $IN_R1_FASTQ \
-            --out-fasta $OUTPUT_DIR/${LIBRARY}_R1.fa \
-            --out-alignment-clustalw $OUTPUT_DIR/${LIBRARY}_R1.clustalw.aln \
-            --sample-size 100 \
-        | tee $OUTPUT_DIR/${LIBRARY}_R1_top_seqs.txt
-        python distance_to_pattern_frequencies.py \
-            --in-fastq $IN_R1_FASTQ \
-            --pattern $LEN_PATTERN \
-            --nreads 10000 \
-            --max-tries 10 \
-        | tee $OUTPUT_DIR/${LIBRARY}_R1_distance_to_pattern_frequencies.txt
-        
-        echo "--------"
-        echo "   R2"
-        echo "--------"
-        python $WORKING_DIR/find_top_sequences.py \
-            --in-fastq $IN_R1_FASTQ \
-            --out-fasta $OUTPUT_DIR/${LIBRARY}_R2.fa \
-            --out-alignment-clustalw $OUTPUT_DIR/${LIBRARY}_R2.clustalw.aln \
-            --sample-size 100 \
-        | tee $OUTPUT_DIR/${LIBRARY}_R2_top_seqs.txt
-        python distance_to_pattern_frequencies.py \
-            --in-fastq $IN_R2_FASTQ \
-            --pattern $LEN_PATTERN \
-            --nreads 10000 \
-            --max-tries 10 \
-        | tee $OUTPUT_DIR/${LIBRARY}_R2_distance_to_pattern_frequencies.txt
+        if [[ ! "$skip_fastq_processing" == "TRUE" ]]
+        then
+
+            echo "--------"
+            echo "   R1"
+            echo "--------"
+            python $WORKING_DIR/find_top_sequences.py \
+                --in-fastq $IN_R1_FASTQ \
+                --out-fasta $OUTPUT_DIR/${LIBRARY}_R1.fa \
+                --out-alignment-clustalw $OUTPUT_DIR/${LIBRARY}_R1.clustalw.aln \
+                --sample-size 100 \
+            | tee $OUTPUT_DIR/${LIBRARY}_R1_top_seqs.txt
+            python distance_to_pattern_frequencies.py \
+                --in-fastq $IN_R1_FASTQ \
+                --pattern $LEN_PATTERN \
+                --nreads 10000 \
+                --max-tries 10 \
+            | tee $OUTPUT_DIR/${LIBRARY}_R1_distance_to_pattern_frequencies.txt
+            
+            echo "--------"
+            echo "   R2"
+            echo "--------"
+            python $WORKING_DIR/find_top_sequences.py \
+                --in-fastq $IN_R1_FASTQ \
+                --out-fasta $OUTPUT_DIR/${LIBRARY}_R2.fa \
+                --out-alignment-clustalw $OUTPUT_DIR/${LIBRARY}_R2.clustalw.aln \
+                --sample-size 100 \
+            | tee $OUTPUT_DIR/${LIBRARY}_R2_top_seqs.txt
+            python distance_to_pattern_frequencies.py \
+                --in-fastq $IN_R2_FASTQ \
+                --pattern $LEN_PATTERN \
+                --nreads 10000 \
+                --max-tries 10 \
+            | tee $OUTPUT_DIR/${LIBRARY}_R2_distance_to_pattern_frequencies.txt
+        fi
 
         echo "-------------------"
         echo "   R1 reoriented"
