@@ -1,7 +1,9 @@
-# user defined configuration files are ignored
-# changes in /examples are tracked
-configure/
-
-# files in references are created by user and not tracked
-references/
-
+# user generated files folders
+output/
+input/
+config.sh
+config.yaml
+config.yml
+sample_metadata.txt
+sample_metadata.yaml
+sample_metadata.yml

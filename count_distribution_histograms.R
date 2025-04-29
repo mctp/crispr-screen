@@ -1,52 +1,51 @@
 library(tidyverse)
+library(yaml)
 
 options(width = Sys.getenv("COLUMNS", unset = 80))
-
-# Function to parse config.sh and set environment variables
+# Function to parse config file and set environment variables
 parse_config <- function(file) {
-    lines <- readLines(file, warn = FALSE)
-    for (line in lines) {
-        if (grepl("=", line) && !grepl("^#", line)) {
-            key_value <- strsplit(line, "=")[[1]]
-            key <- key_value[1]
-            value <- gsub("\"", "", key_value[2])
-            value <- sub("#.*$", "", value) # Remove comments
-            value <- trimws(value) # Remove leading and trailing whitespace
-            # Check if the value is a bash array
-            if (grepl("^\\(", value) && grepl("\\)$", value)) {
-                value <- gsub("[()]", "", value)
-                # Split the string 'value' by whitespace that is not preceded by a backslash and is outside of quoted substrings.
-                # The regex breakdown:
-                # - (?<!\\\\): Negative lookbehind to ensure the whitespace is not preceded by a backslash.
-                # - \\s+: Matches one or more whitespace characters.
-                # - (?= ... ): Positive lookahead to ensure the following condition is met:
-                #   - (?:[^\"]*\"[^\"]*\")*: Non-capturing group that matches pairs of quotes with any characters except quotes in between.
-                #   - [^\"]*$: Matches any characters except quotes until the end of the string.
-                # The 'perl = TRUE' argument enables Perl-compatible regex for advanced features like lookaheads and lookbehinds.
-                value <- strsplit(value, "(?<!\\\\)\\s+(?=(?:[^\"]*\"[^\"]*\")*[^\"]*$)", perl = TRUE)[[1]]
+    if (grepl("\\.yaml$", file) || grepl("\\.yml$", file)) {
+        config <- yaml::read_yaml(file)
+        names(config) <- tolower(names(config)) # Convert keys to lowercase
+    } else {
+        lines <- readLines(file, warn = FALSE)
+        for (line in lines) {
+            if (grepl("=", line) && !grepl("^#", line)) {
+                key_value <- strsplit(line, "=")[[1]]
+                key <- tolower(key_value[1]) # Convert key to lowercase
+                value <- gsub("\"", "", key_value[2])
+                value <- sub("#.*$", "", value) # Remove comments
+                value <- trimws(value) # Remove leading and trailing whitespace
+                # Check if the value is a bash array
+                if (grepl("^\\(", value) && grepl("\\)$", value)) {
+                    value <- gsub("[()]", "", value)
+                    value <- strsplit(value, "(?<!\\\\)\\s+(?=(?:[^\"]*\"[^\"]*\")*[^\"]*$)", perl = TRUE)[[1]]
+                }
+                assign(key, value, envir = .GlobalEnv)
             }
-            assign(key, value, envir = .GlobalEnv)
         }
+        config_values <- ls(.GlobalEnv)
+        config_values <- config_values[!config_values %in% c("lines", "key_value", "key", "value")] # Exclude temporary variables
+        config <- lapply(config_values, function(x) get(x, envir = .GlobalEnv))
+        names(config) <- config_values
     }
-    config_values <- ls(.GlobalEnv)
-    config_values <- config_values[!config_values %in% c("lines", "key_value", "key", "value")] # Exclude temporary variables
-    config <- lapply(config_values, function(x) get(x, envir = .GlobalEnv))
-    names(config) <- config_values
 
     # Check for Docker status and set directories accordingly
     if (is_docker()) {
-        if (!is.null(config[['DOCKER_WORKING_DIR']])) {
-            config[['WORKING_DIR']] <- config[['DOCKER_WORKING_DIR']]
+        if (!is.null(config[['docker_working_dir']])) {
+            config[['working_dir']] <- normalizePath(config[['docker_working_dir']], mustWork = FALSE)
         }
-        if (!is.null(config[['DOCKER_FASTQ_DIR']])) {
-            config[['FASTQ_DIR']] <- config[['DOCKER_FASTQ_DIR']]
+        if (!is.null(config[['docker_fastq_dir']])) {
+            config[['fastq_dir']] <- normalizePath(config[['docker_fastq_dir']], mustWork = FALSE)
         }
-        if (!is.null(config[['DOCKER_OUTPUT_DIR']])) {
-            config[['OUTPUT_DIR']] <- config[['DOCKER_OUTPUT_DIR']]
+        if (!is.null(config[['docker_output_dir']])) {
+            config[['output_dir']] <- normalizePath(config[['docker_output_dir']], mustWork = FALSE)
         }
     }
 
-    config <- lapply(config, function(value) resolve_references(value, config))
+    if (!grepl("\\.yaml$", file) && !grepl("\\.yml$", file)) {
+        config <- lapply(config, function(value) resolve_references(value, config))
+    }
     return(config)
 }
 
@@ -68,8 +67,14 @@ is_docker <- function() {
     file.exists("/.dockerenv")
 }
 
-# Parse the config.sh file
-config <- parse_config("config.sh")
+# Parse the config.yaml file if it exists, otherwise try config.sh
+if (file.exists("config.yaml")) {
+    config <- parse_config("config.yaml")
+} else if (file.exists("config.sh")) {
+    config <- parse_config("config.sh")
+} else {
+    stop("No configuration file found. Please make config.yaml or config.sh available in current working directory.")
+}
 
 
 experiment_name <- ifelse(!is.null(config[['experiment_name']]), config[['experiment_name']], "")
@@ -78,31 +83,85 @@ if (experiment_name != "") {
     experiment_prefix <- paste0(experiment_name, "_")
 }
 
-meta <- read.delim(config[['METADATA_FILE']], sep = "\t", header = TRUE, comment.char = "#")
+if (is.null(config[['metadata_file']]) || !file.exists(config[['metadata_file']])) {
+    stop("Error: metadata_file is not defined or does not exist in the configuration.")
+}
+meta <- read.delim(config[['metadata_file']], sep = "\t", header = TRUE, comment.char = "#")
 meta <- meta %>%
-    mutate(sample_original = sample) %>%
-    mutate(sample = gsub("-", ".", sample))
+    mutate(sample_original = sample, # Preserve original sample names
+           sample = gsub("-", ".", sample)) # Create a modified version for other operations
 
-sgrnas <- read.delim(config[['ORIG_SGRNA_LIST_FILE']],sep="\t",header=TRUE)
+if (is.null(config[['orig_sgrna_list_file']]) || !file.exists(config[['orig_sgrna_list_file']])) {
+    stop("Error: orig_sgrna_list_file is not defined or does not exist in the configuration.")
+}
+sgrnas <- read.delim(config[['orig_sgrna_list_file']], sep = "\t", header = TRUE)
 
-count_method <- config[['MODE']]
-outdir <- config[['OUTPUT_DIR']]
+count_method <- config[['mode']]
+outdir <- config[['output_dir']]
 
-count_summary <- bind_rows(lapply(
-    meta$sample_original, function(x) {
-        df <- read.delim(paste(outdir, "/", x, "_", count_method, "/", x, "_", count_method, ".countsummary.txt", sep = ""), sep = "\t", header = TRUE)
-        return(df[, 1:8])
-    }))
+sgrnas <- read.delim(config[['orig_sgrna_list_file']], sep = "\t", header = TRUE)
+
+# Define 'x' based on the metadata file
+if ("sample_original" %in% colnames(meta)) {
+    x <- meta$sample_original[1] # Example: Use the first sample as default
+} else {
+    warning("'sample_original' column is missing in the metadata file. Using 'sample' column instead.")
+    if ("sample" %in% colnames(meta)) {
+        x <- meta$sample[1] # Use the first sample as default
+    } else {
+        stop("Error: Neither 'sample_original' nor 'sample' column is present in the metadata file.")
+    }
+}
+file_path <- file.path(outdir, paste0(meta$sample_original[1], "_", count_method, "/", meta$sample_original[1], "_", count_method, ".countsummary.txt"))
+file_path <- file.path(outdir, paste0(x, "_", count_method, "/", x, "_", count_method, ".countsummary.txt"))
+if (is.null(x) || x == ".") {
+    stop("Error: 'x' is not defined or is invalid.")
+}
+if (!file.exists(file_path)) {
+    stop(paste("Error: File not found -", file_path))
+}
+df <- read.delim(file_path, sep = "\t", header = TRUE)
+
+    count_summary <- do.call(rbind, lapply(
+        meta$sample_original, function(x) {
+            df <- read.delim(paste(outdir, "/", x, "_", count_method, "/", x, "_", count_method, ".countsummary.txt", sep = ""), sep = "\t", header = TRUE)
+            return(df[, 1:8])
+        }
+    ))
 count_summary$coverage <- count_summary$Mapped / count_summary$TotalsgRNAs
 
 cat(capture.output(print(count_summary)), sep = "\n")
+# Load counts and CPM matrices
+count_matrix_file <- file.path(outdir, paste0(experiment_prefix, "sgrna_count_matrix.txt"))
+cpm_matrix_file <- file.path(outdir, paste0(experiment_prefix, "sgrna_cpm_matrix.txt"))
 
+if (!file.exists(count_matrix_file) || !file.exists(cpm_matrix_file)) {
+    # Check with "experiment_" prefix if files are not found
+    experiment_prefix <- "experiment_"
+    count_matrix_file <- file.path(outdir, paste0(experiment_prefix, "sgrna_count_matrix.txt"))
+    cpm_matrix_file <- file.path(outdir, paste0(experiment_prefix, "sgrna_cpm_matrix.txt"))
+}
+
+if (!file.exists(count_matrix_file)) {
+    stop(paste("Error: Count matrix file not found -", count_matrix_file))
+}
+if (!file.exists(cpm_matrix_file)) {
+    stop(paste("Error: CPM matrix file not found -", cpm_matrix_file))
+}
+sgrna_cpm.df <- read.delim(cpm_matrix_file, sep = "\t", header = TRUE)
 meta.2 <- left_join(meta,count_summary,by=c("sample"="Label"))
 
+# Print experiment name and prefix for debugging
+cat("Experiment Name:", experiment_name, "\n")
+cat("Experiment Prefix:", experiment_prefix, "\n")
 # Load counts and CPM matrices
-sgrna_count.df <- read.delim(file.path(outdir, "sgrna_count_matrix.txt"), sep = "\t", header = TRUE)
+count_matrix_file <- file.path(outdir, paste0(experiment_prefix, "sgrna_count_matrix.txt"))
+cpm_matrix_file <- file.path(outdir, paste0(experiment_prefix, "sgrna_cpm_matrix.txt"))
+
+sgrna_count.df <- read.delim(count_matrix_file, sep = "\t", header = TRUE)
 colnames(sgrna_count.df)[1:2] <- c("sgRNA", "gene")
-sgrna_cpm.df <- read.delim(file.path(outdir, "sgrna_cpm_matrix.txt"), sep = "\t", header = TRUE)
+
+sgrna_cpm.df <- read.delim(cpm_matrix_file, sep = "\t", header = TRUE)
 colnames(sgrna_cpm.df)[1:2] <- c("sgRNA", "gene")
 
 # Pivot long the sgrna_count.df

@@ -2,50 +2,58 @@
 
 set -e  # exit on error
 
-# check software requirements
-BOWTIE2_PATH=$(which bowtie2)
-CUTADAPT_PATH=$(which cutadapt)
-MAGECK_PATH=$(which mageck)
-SAMTOOLS_PATH=$(which samtools)
-
-if [[  "$SAMTOOLS_PATH" == "" || "$BOWTIE2_PATH" == "" || "$CUTADAPT_PATH" == "" || "$MAGECK_PATH" == "" ]]
-then
-    echo "required software is not installed or on the current PATH:"
-    if [[  "$SAMTOOLS_PATH" == "" ]]
-    then
-        echo "  samtools"
-    fi
-    if [[  "$BOWTIE2_PATH" == "" ]]
-    then
-        echo "  bowtie2"
-    fi
-    if [[  "$CUTADAPT_PATH" == "" ]]
-    then
-        echo "  cutadapt"
-    fi
-    if [[  "$MAGECK_PATH" == "" ]]
-    then
-        echo "  mageck"
-    fi
-    echo "exiting..."
-    exit 1
-fi
+# default values, if not definied in config or via cmd parameters
+MODE=fastq
 SEARCH_REVCOMP=FALSE
+reformat_sgrna_list=FALSE # mostly not used any more, so default is FALSE
+skip_references=FALSE
+force_references=FALSE
+skip_fastq_processing=FALSE
+skip_matrix=FALSE
+generate_references_cmd_opts=
 
-source config.sh                # load config variables         
+if [[ -f "config.yml" ]]; then
+    if command -v yq &> /dev/null; then
+        echo "Parsing config.yml..."
+        eval $(yq e 'to_entries | .[] | .key + "=" + (.value | @sh)' config.yml | sed 's/^/export /')
+        # yaml variables are all lowercase
+        MODE=$mode
+        SEARCH_REVCOMP=$search_revcomp
+        NCPU=$ncpu
+        DOCKER_PATHS=$docker_paths
+        WORKING_DIR=$working_dir
+        FASTQ_DIR=$fastq_dir
+        OUTPUT_DIR=$output_dir
+        METADATA_FILE=$metadata_file
+        DOCKER_WORKING_DIR=$docker_working_dir
+        DOCKER_FASTQ_DIR=$docker_fastq_dir
+        ORIG_SGRNA_LIST_FILE=$orig_sgrna_list_file
+        SGRNA_LIST_NAME=$sgrna_list_name
+        REFERENCES_DIR=$references_dir
+        US_SEQ=$us_seq
+        DS_SEQ=$ds_seq
+        TRIM_SEQ=$trim_seq
+        LEN_PATTERN=$len_pattern
+    else
+        echo "yq is not installed. Falling back to config.sh"
+        source config.sh
+    fi
+else
+    source config.sh # fall back to config.sh
+fi
+
 source process_metadata.sh
 
 if [[ "$DOCKER_PATHS" != "" ]]
 then
     echo "Warning: DOCKER_PATHS is set to $DOCKER_PATHS in config.sh, overriding any autodetection of docker.  This could cause problems."
-fi
-
-# detect if we are running in a docker container
-if [[ -f /.dockerenv ]]
-then
-    DOCKER_PATHS=TRUE
 else
-    DOCKER_PATHS=FALSE
+    # detect if we are running in a docker container
+    if grep -qE '/docker|/lxc' /proc/1/cgroup 2>/dev/null; then
+        DOCKER_PATHS=TRUE
+    else
+        DOCKER_PATHS=FALSE
+    fi
 fi
 
 if [[ "$DOCKER_PATHS" == "TRUE" ]]
@@ -65,15 +73,13 @@ then
     exit 1
 fi
 
-reformat_sgrna_list=FALSE # mostly not used any more, so default is FALSE
-generate_references_cmd_opts=
-skip_references=FALSE
-force_references=FALSE
-skip_fastq_processing=FALSE
-
 while [ "$#" -gt 0 ]
 do
     case "$1" in
+        --skip-matrix )
+            skip_matrix=TRUE
+            shift 1
+            ;;
         --skip-qc )
            skip_qc=TRUE
            shift 1
@@ -123,6 +129,29 @@ fi
 
 if [[ "$MODE" == "bam" ]]
 then
+    # check software requirements
+    BOWTIE2_PATH=$(which bowtie2)
+    CUTADAPT_PATH=$(which cutadapt)
+    SAMTOOLS_PATH=$(which samtools)
+
+    if [[  "$SAMTOOLS_PATH" == "" || "$BOWTIE2_PATH" == "" || "$CUTADAPT_PATH" == "" ]]
+    then
+        echo "required software is not installed or on the current PATH:"
+        if [[  "$SAMTOOLS_PATH" == "" ]]
+        then
+            echo "  samtools"
+        fi
+        if [[  "$BOWTIE2_PATH" == "" ]]
+        then
+            echo "  bowtie2"
+        fi
+        if [[  "$CUTADAPT_PATH" == "" ]]
+        then
+            echo "  cutadapt"
+        fi
+        echo "exiting..."
+        exit 1
+    fi
     # skip ref/index if explicitly set or if output files exist with a test
     if [[ "$skip_references" == "TRUE" ]]
     then
@@ -187,13 +216,19 @@ do
         echo "to: $IN_R1_FASTQ"
         cat $R1_space > $IN_R1_FASTQ
 
-        echo "merging $R2_space"
-        echo "to: $IN_R2_FASTQ"
-        cat $R2_space > $IN_R2_FASTQ
+        if [[ "$paired_end_fastq" == "FALSE" ]]
+        then
+            echo "WARNING: skipping R2 because paired_end_fastq is set to FALSE."
+        else
+            echo "merging $R2_space"
+            echo "to: $IN_R2_FASTQ"
+            cat $R2_space > $IN_R2_FASTQ
+        fi
 
         FASTQ_STATS_FILE="$OUTPUT_DIR/fastq_stats.txt"
 
-        if [[ ! -e "$FASTQ_STATS_FILE" ]]; then
+        if [[ ! -e "$FASTQ_STATS_FILE" ]]
+        then
             echo -e "library\tread_count" > "$FASTQ_STATS_FILE"
         fi
 
@@ -289,52 +324,66 @@ do
 
         if [[ "$reorient_fastq" == "TRUE" && "$MODE" != "bam" ]]
         then
-            if [[ ! -e "$IN_R1_RE_FASTQ" || ! -e "$IN_R2_RE_FASTQ" ]]
+            if [[ "$paired_end_fastq" == "FALSE" ]]
             then
-                echo "reorienting fastq files (this will take a long time)..."
-                
-                time python reorient_fastq_parallel.py \
-                    --sequences-r1 $(IFS=,; echo "${r1_seqs[*]}") \
-                    --sequences-r2 $(IFS=,; echo "${r2_seqs[*]}") \
-                    --cpus $NCPU \
-                    --in-fastq-r1 $IN_R1_FASTQ \
-                    --in-fastq-r2 $IN_R2_FASTQ \
-                    --out-fastq-r1 $IN_R1_RE_FASTQ \
-                    --out-fastq-r2 $IN_R2_RE_FASTQ \
-                    --plot \
-                    --plot-prefix $OUTPUT_DIR/$SAMPLE
-
+                echo "WARNING: skipping reorientation because paired_end_fastq is set to FALSE."
             else
-                echo "reoriented fastq files already exist, skipping reorientation."
+
+                if [[ ! -e "$IN_R1_RE_FASTQ" || ! -e "$IN_R2_RE_FASTQ" ]]
+                then
+                    echo "reorienting fastq files (this will take a long time)..."
+                    
+                    time python reorient_fastq_parallel.py \
+                        --sequences-r1 $(IFS=,; echo "${r1_seqs[*]}") \
+                        --sequences-r2 $(IFS=,; echo "${r2_seqs[*]}") \
+                        --cpus $NCPU \
+                        --in-fastq-r1 $IN_R1_FASTQ \
+                        --in-fastq-r2 $IN_R2_FASTQ \
+                        --out-fastq-r1 $IN_R1_RE_FASTQ \
+                        --out-fastq-r2 $IN_R2_RE_FASTQ \
+                        --plot \
+                        --plot-prefix $OUTPUT_DIR/$SAMPLE
+
+                else
+                    echo "reoriented fastq files already exist, skipping reorientation."
+                fi
             fi
         fi
 
     fi
-    # QC things
 
+    # QC things
     if [[ "$skip_qc" == "TRUE" ]]
     then
         echo    "WARNING: skipping QC section."    
     else
-        if [[ ! "$skip_fastq_processing" == "TRUE" ]]
-        then
+        echo "--------"
+        echo "   R1"
+        echo "--------"
+        python $WORKING_DIR/find_top_sequences.py \
+            --in-fastq $IN_R1_FASTQ \
+            --out-fasta $OUTPUT_DIR/${LIBRARY}_R1.fa \
+            --out-alignment-clustalw $OUTPUT_DIR/${LIBRARY}_R1.clustalw.aln \
+            --sample-size 1000 \
+        | tee $OUTPUT_DIR/${LIBRARY}_R1_top_seqs.txt
 
-            echo "--------"
-            echo "   R1"
-            echo "--------"
-            python $WORKING_DIR/find_top_sequences.py \
-                --in-fastq $IN_R1_FASTQ \
-                --out-fasta $OUTPUT_DIR/${LIBRARY}_R1.fa \
-                --out-alignment-clustalw $OUTPUT_DIR/${LIBRARY}_R1.clustalw.aln \
-                --sample-size 100 \
-            | tee $OUTPUT_DIR/${LIBRARY}_R1_top_seqs.txt
+        if [[ -n "$LEN_PATTERN" ]]; then
             python distance_to_pattern_frequencies.py \
-                --in-fastq $IN_R1_FASTQ \
-                --pattern $LEN_PATTERN \
-                --nreads 10000 \
-                --max-tries 10 \
+            --in-fastq $IN_R1_FASTQ \
+            --pattern $LEN_PATTERN \
+            --nreads 10000 \
+            --start-at 0 \
+            --stop-at 0 \
+            --center-sequence \
+            --show-threshold 0.005 \
             | tee $OUTPUT_DIR/${LIBRARY}_R1_distance_to_pattern_frequencies.txt
-            
+        fi
+
+        if [[ "$paired_end_fastq" == "FALSE" ]]
+        then
+            echo "WARNING: skipping R2 because paired_end_fastq is set to FALSE."
+        else
+
             echo "--------"
             echo "   R2"
             echo "--------"
@@ -342,50 +391,83 @@ do
                 --in-fastq $IN_R1_FASTQ \
                 --out-fasta $OUTPUT_DIR/${LIBRARY}_R2.fa \
                 --out-alignment-clustalw $OUTPUT_DIR/${LIBRARY}_R2.clustalw.aln \
-                --sample-size 100 \
+                --sample-size 1000 \
             | tee $OUTPUT_DIR/${LIBRARY}_R2_top_seqs.txt
-            python distance_to_pattern_frequencies.py \
-                --in-fastq $IN_R2_FASTQ \
-                --pattern $LEN_PATTERN \
-                --nreads 10000 \
-                --max-tries 10 \
-            | tee $OUTPUT_DIR/${LIBRARY}_R2_distance_to_pattern_frequencies.txt
+
+            if [[ -n "$LEN_PATTERN" ]]; then
+                python distance_to_pattern_frequencies.py \
+                    --in-fastq $IN_R2_FASTQ \
+                    --pattern $LEN_PATTERN \
+                    --nreads 10000 \
+                    --start-at 0 \
+                    --stop-at 0 \
+                    --center-sequence \
+                    --show-threshold 0.005 \
+                | tee $OUTPUT_DIR/${LIBRARY}_R2_distance_to_pattern_frequencies.txt
+            fi
         fi
 
-        echo "-------------------"
-        echo "   R1 reoriented"
-        echo "-------------------"
-        python $WORKING_DIR/find_top_sequences.py \
+        if [[ -e "$IN_R1_RE_FASTQ" ]]
+        then
+            echo "-------------------"
+            echo "   R1 reoriented"
+            echo "-------------------"
+            python $WORKING_DIR/find_top_sequences.py \
             --in-fastq $IN_R1_RE_FASTQ \
             --out-fasta $OUTPUT_DIR/${LIBRARY}_R1_reoriented.fa \
             --out-alignment-clustalw $OUTPUT_DIR/${LIBRARY}_R1_reoriented.clustalw.aln \
-            --sample-size 100 \
-        | tee $OUTPUT_DIR/${LIBRARY}_R1_reoriented_top_seqs.txt
-        python distance_to_pattern_frequencies.py \
-            --in-fastq $IN_R1_RE_FASTQ \
-            --pattern $LEN_PATTERN \
-            --nreads 10000 \
-            --max-tries 10 \
-        | tee $OUTPUT_DIR/${LIBRARY}_R1_reoriented_distance_to_pattern_frequencies.txt
+            --sample-size 1000 \
+            | tee $OUTPUT_DIR/${LIBRARY}_R1_reoriented_top_seqs.txt
 
-        echo "-------------------"
-        echo "   R2 reoriented"
-        echo "-------------------"
-        python $WORKING_DIR/find_top_sequences.py \
-            --in-fastq $IN_R2_RE_FASTQ \
-            --out-fasta $OUTPUT_DIR/${LIBRARY}_R2_reoriented.fa \
-            --out-alignment-clustalw $OUTPUT_DIR/${LIBRARY}_R2_reoriented.clustalw.aln \
-            --sample-size 100 \
-        | tee $OUTPUT_DIR/${LIBRARY}_R2_reoriented_top_seqs.txt
-        python distance_to_pattern_frequencies.py \
-            --in-fastq $IN_R2_RE_FASTQ \
-            --pattern $LEN_PATTERN \
-            --nreads 10000 \
-            --max-tries 10 \
-        | tee $OUTPUT_DIR/${LIBRARY}_R2_reoriented_distance_to_pattern_frequencies.txt
+            if [[ -n "$LEN_PATTERN" ]]; then
+                python distance_to_pattern_frequencies.py \
+                    --in-fastq $IN_R1_RE_FASTQ \
+                    --pattern $LEN_PATTERN \
+                    --nreads 10000 \
+                    --start-at 0 \
+                    --stop-at 0 \
+                    --center-sequence \
+                    --show-threshold 0.005 \
+                | tee $OUTPUT_DIR/${LIBRARY}_R1_reoriented_distance_to_pattern_frequencies.txt
+            fi
+        else
+            echo "WARNING: Reoriented R1 fastq files do not exist. Skipping reoriented QC."
+        fi
+
+        if [[ "$paired_end_fastq" == "FALSE" ]]
+        then
+            echo "WARNING: skipping R2 because paired_end_fastq is set to FALSE."
+        else
+            if [[ -e "$IN_R2_RE_FASTQ" ]]
+            then
+                echo "-------------------"
+                echo "   R2 reoriented"
+                echo "-------------------"
+                python $WORKING_DIR/find_top_sequences.py \
+                    --in-fastq $IN_R2_RE_FASTQ \
+                    --out-fasta $OUTPUT_DIR/${LIBRARY}_R2_reoriented.fa \
+                    --out-alignment-clustalw $OUTPUT_DIR/${LIBRARY}_R2_reoriented.clustalw.aln \
+                    --sample-size 1000 \
+                | tee $OUTPUT_DIR/${LIBRARY}_R2_reoriented_top_seqs.txt
+
+                if [[ -n "$LEN_PATTERN" ]]; then
+                    python distance_to_pattern_frequencies.py \
+                        --in-fastq $IN_R2_RE_FASTQ \
+                        --pattern $LEN_PATTERN \
+                        --nreads 10000 \
+                        --start-at 0 \
+                        --stop-at 0 \
+                        --center-sequence \
+                        --show-threshold 0.005 \
+                    | tee $OUTPUT_DIR/${LIBRARY}_R2_reoriented_distance_to_pattern_frequencies.txt
+                fi
+            else
+                echo "WARNING: Reoriented R2 fastq files do not exist. Skipping reoriented QC."
+            fi
+        fi
     fi
 
-    if [[ "$reorient_fastq" == "TRUE" && "$MODE" != "bam" ]]
+    if [[ "$reorient_fastq" == "TRUE" && "$MODE" != "bam" && "$paired_end_fastq" != "FALSE" ]]
     then
         # use reoriented fastq files
         IN_R1_FASTQ=$IN_R1_RE_FASTQ
@@ -404,6 +486,29 @@ do
 
     elif [[ "$MODE" == "bam" ]]
     then
+        # check software requirements
+        BOWTIE2_PATH=$(which bowtie2)
+        CUTADAPT_PATH=$(which cutadapt)
+        SAMTOOLS_PATH=$(which samtools)
+
+        if [[  "$SAMTOOLS_PATH" == "" || "$BOWTIE2_PATH" == "" || "$CUTADAPT_PATH" == "" ]]
+        then
+            echo "required software is not installed or on the current PATH:"
+            if [[  "$SAMTOOLS_PATH" == "" ]]
+            then
+                echo "  samtools"
+            fi
+            if [[  "$BOWTIE2_PATH" == "" ]]
+            then
+                echo "  bowtie2"
+            fi
+            if [[  "$CUTADAPT_PATH" == "" ]]
+            then
+                echo "  cutadapt"
+            fi
+            echo "exiting..."
+            exit 1
+        fi
         # trim and align reads, then run mageck count with bam input
         source trim_reads.sh
         source align_bt2.sh
@@ -415,13 +520,18 @@ do
     fi
 done
 
-echo
-echo "building count and cpm matrix files..."
-python cpm_matrix.py --config config.sh
-echo
-echo "plotting count distribution histograms..."
-Rscript count_distribution_histograms.R
-echo
+if [[ "$skip_matrix" == "TRUE" ]]
+then
+    echo "Skipping matrix generation."
+else
+    echo
+    echo "building count and cpm matrix files..."
+    python cpm_matrix.py --config config.sh
+    echo
+    echo "plotting count distribution histograms..."
+    Rscript count_distribution_histograms.R
+    echo   
+fi
 
 if [[ "$skip_analysis" == "TRUE" ]]
 then

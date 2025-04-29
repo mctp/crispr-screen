@@ -9,46 +9,14 @@ import joblib
 import numpy as np
 import logging
 import sys
-
-logging.basicConfig(
-    level=logging.INFO,
-    format="[{asctime}] [{levelname}] {message}",
-    style="{",
-    datefmt="%Y-%m-%d %H:%M:%S",
-    handlers=[
-        logging.StreamHandler(sys.stdout),
-        logging.FileHandler("output/find_top_sequences.log")
-    ]
-)
-
-try:
-    from termcolor import colored
-    termcolor_available = True
-except ImportError:
-    termcolor_available = False
-
-parser = argparse.ArgumentParser(description="Identify top sequences in fastq and generate a consensus.")
-parser.add_argument("--in-fastq", type=str, help="Input FASTQ file")
-parser.add_argument("--out-fasta", type=str, help="Output FASTA file")
-parser.add_argument("--out-alignment-clustalw", type=str, help="Output alignment file for ClustalW")
-parser.add_argument("--sample-size", type=int, default=1000, help="Number of sequences to sample")
-parser.add_argument("--msa-sample-size", type=int, default=200, help="Number of sequences to sample for MSA.")
-parser.add_argument("--skip-consensus", action="store_true", help="Skip ClustalW alignment and consensus generation. Use if ClustalW is not available.")
-parser.add_argument("--seed", type=int, help="Seed for random sampling")
-parser.add_argument("--method-2", action="store_true", help="Use the second method to classify sequences")
-parser.add_argument('--model', help='Filename of trained model.')
-
-args = parser.parse_args()
-
-def is_gzipped(file_path):
-    with open(file_path, 'rb') as f:
-        return f.read(2) == b'\x1f\x8b'
+# project-specific imports
+import utilities.utilities as util
 
 def sample_sequences(fastq_file, sample_size=10, seed=None):
     sampled_fastq = "sampled.fastq"
     command = ["seqtk", "sample", fastq_file, str(sample_size)]
     
-    if is_gzipped(fastq_file):
+    if util.is_gzipped(fastq_file):
         command.insert(2, "-z")
 
     if seed is not None:
@@ -165,84 +133,127 @@ def assign_representative_sequences(sequence_classes):
         representative_sequences.append(most_frequent_sequence)
     return representative_sequences
 
-base_name, ext1 = os.path.splitext(args.in_fastq)
-if ext1 == ".gz":
-    base_name, ext2 = os.path.splitext(base_name)
+def find_top_sequences(in_fastq, out_fasta, out_alignment_clustalw=None, sample_size=1000, msa_sample_size=200, skip_consensus=False, seed=None, method_2=False, model=None):
+    try:
+        from termcolor import colored
+        termcolor_available = True
+    except ImportError:
+        termcolor_available = False
 
-if not args.out_fasta:
-    out_fasta = base_name + ".fasta"
-else:
-    out_fasta = args.out_fasta
+    base_name, ext1 = os.path.splitext(in_fastq)
+    if ext1 == ".gz":
+        base_name, ext2 = os.path.splitext(base_name)
 
-if not args.out_alignment_clustalw:
-    out_alignment_clustalw = base_name + ".aln"
-else:
-    out_alignment_clustalw = args.out_alignment_clustalw
-
-sampled_sequences = sample_sequences(args.in_fastq, sample_size=args.sample_size, seed=args.seed)
-write_fasta(sampled_sequences, out_fasta)
-
-if args.method_2:
-    if args.model:
-        sequence_classes = load_model_and_classify(sampled_sequences, model_filename=args.model)
+    if not out_fasta:
+        out_fasta = base_name + ".fasta"
     else:
-        sequence_classes = load_model_and_classify(sampled_sequences)
-    ood_sequences = [seq for seq_class in sequence_classes for seq, _, ood in seq_class if ood]
-    logging.info(f"Number of OOD sequences: {len(ood_sequences)} ({len(ood_sequences) / len(sampled_sequences):.2%})")
-    filtered_sequence_classes = []
-    for seq_class in sequence_classes:
-        filtered_class = [seq for seq in seq_class if not seq[2]]
-        if filtered_class:
-            filtered_sequence_classes.append(filtered_class)
-    
-    logging.info("OOD sequences (first 20):")
-    for ood_seq in ood_sequences[:20]:
-        logging.info(ood_seq.seq)
-    original_sequence_classes = sequence_classes
-    sequence_classes = filtered_sequence_classes
-else:
-    sequence_classes = determine_sequence_classes(sampled_sequences)
-    original_sequence_classes = sequence_classes
+        out_fasta = out_fasta
 
-representative_sequences = assign_representative_sequences(sequence_classes)
+    if out_alignment_clustalw is None:
+        out_alignment_clustalw = base_name + ".aln"
 
-logging.info(f"Number of sequence classes: {len(sequence_classes)}")
-for i, seq_class in enumerate(sequence_classes):
-    logging.info(f"Class {i+1}:")
-    representative_sequence = representative_sequences[i]
-    logging.info(f"Representative sequence: {representative_sequence}")
-    logging.info(f"Number of sequences in class: {len(seq_class)} ({len(seq_class) / len(sampled_sequences):.2%})")
+    sampled_sequences = sample_sequences(in_fastq, sample_size=sample_size, seed=seed)
+    write_fasta(sampled_sequences, out_fasta)
 
-
-if not args.skip_consensus:
-    sampled_sequences_for_msa = sampled_sequences[:args.msa_sample_size]
-    write_fasta(sampled_sequences_for_msa, out_fasta)
-    clustalw_alignment = clustalw_alignment(out_fasta, out_alignment_clustalw)
-    consensus = get_consensus(clustalw_alignment)
-
-    if args.sample_size <= 10:
-        logging.info("Sampled sequences:")
-        for sequence in sampled_sequences:
-            logging.info(sequence.seq)
-
-        logging.info("ClustalW2 Alignment:")
-        logging.info(clustalw_alignment)
-
-    logging.info("Consensus sequence:")
-    if termcolor_available:
-        colored_consensus = ""
-        for base in consensus:
-            if base == 'A' or base == 'C' or base == 'T' or base == 'G':
-                colored_consensus += colored(base, 'yellow', attrs=['underline'])
-            elif base == 'N':
-                colored_consensus += colored(base, 'red')
-            else:
-                colored_consensus += colored(base, 'blue')
-        logging.info(colored_consensus)
+    if method_2:
+        if model:
+            sequence_classes = load_model_and_classify(sampled_sequences, model_filename=model)
+        else:
+            sequence_classes = load_model_and_classify(sampled_sequences)
+        ood_sequences = [seq for seq_class in sequence_classes for seq, _, ood in seq_class if ood]
+        logging.info(f"Number of OOD sequences: {len(ood_sequences)} ({len(ood_sequences) / len(sampled_sequences):.2%})")
+        filtered_sequence_classes = []
+        for seq_class in sequence_classes:
+            filtered_class = [seq for seq in seq_class if not seq[2]]
+            if filtered_class:
+                filtered_sequence_classes.append(filtered_class)
+        
+        logging.info("OOD sequences (first 20):")
+        for ood_seq in ood_sequences[:20]:
+            logging.info(ood_seq.seq)
+        original_sequence_classes = sequence_classes
+        sequence_classes = filtered_sequence_classes
     else:
-        logging.info(consensus)
-else:
-    logging.info("Consensus generation skipped.")
+        sequence_classes = determine_sequence_classes(sampled_sequences)
+        original_sequence_classes = sequence_classes
 
-logging.info(f"FASTA file path: {out_fasta}")
-logging.info(f"Alignment file path: {out_alignment_clustalw}")
+    representative_sequences = assign_representative_sequences(sequence_classes)
+
+    logging.info(f"Number of sequence classes: {len(sequence_classes)}")
+    for i, seq_class in enumerate(sequence_classes):
+        logging.info(f"Class {i+1}:")
+        representative_sequence = representative_sequences[i]
+        logging.info(f"Representative sequence: {representative_sequence}")
+        logging.info(f"Number of sequences in class: {len(seq_class)} ({len(seq_class) / len(sampled_sequences):.2%})")
+
+
+    if not skip_consensus:
+        sampled_sequences_for_msa = sampled_sequences[:msa_sample_size]
+        write_fasta(sampled_sequences_for_msa, out_fasta)
+        clustalw_alignment_string = clustalw_alignment(out_fasta, out_alignment_clustalw)
+        consensus = get_consensus(clustalw_alignment_string)
+
+        if sample_size <= 10:
+            logging.info("Sampled sequences:")
+            for sequence in sampled_sequences:
+                logging.info(sequence.seq)
+
+            logging.info("ClustalW2 Alignment:")
+            logging.info(clustalw_alignment_string)
+
+        logging.info("Consensus sequence:")
+        if termcolor_available:
+            colored_consensus = ""
+            for base in consensus:
+                if base == 'A' or base == 'C' or base == 'T' or base == 'G':
+                    colored_consensus += colored(base, 'yellow', attrs=['underline'])
+                elif base == 'N':
+                    colored_consensus += colored(base, 'red')
+                else:
+                    colored_consensus += colored(base, 'blue')
+            logging.info(colored_consensus)
+        else:
+            logging.info(consensus)
+    else:
+        logging.info("Consensus generation skipped.")
+
+    logging.info(f"FASTA file path: {out_fasta}")
+    logging.info(f"Alignment file path: {out_alignment_clustalw}")
+
+
+if __name__ == "__main__":
+
+    logging.basicConfig(
+        level=logging.INFO,
+        format="[{asctime}] [{levelname}] {message}",
+        style="{",
+        datefmt="%Y-%m-%d %H:%M:%S",
+        handlers=[
+            logging.StreamHandler(sys.stdout),
+            logging.FileHandler("output/find_top_sequences.log")
+        ]
+    )
+
+    parser = argparse.ArgumentParser(description="Identify top sequences in fastq and generate a consensus.")
+    parser.add_argument("--in-fastq", type=str, help="Input FASTQ file")
+    parser.add_argument("--out-fasta", type=str, help="Output FASTA file")
+    parser.add_argument("--out-alignment-clustalw", type=str, help="Output alignment file for ClustalW")
+    parser.add_argument("--sample-size", type=int, default=1000, help="Number of sequences to sample")
+    parser.add_argument("--msa-sample-size", type=int, default=200, help="Number of sequences to sample for MSA.")
+    parser.add_argument("--skip-consensus", action="store_true", help="Skip ClustalW alignment and consensus generation. Use if ClustalW is not available.")
+    parser.add_argument("--seed", type=int, help="Seed for random sampling")
+    parser.add_argument("--method-2", action="store_true", help="Use the second method to classify sequences")
+    parser.add_argument('--model', help='Filename of trained model.')
+    args = parser.parse_args()
+
+    find_top_sequences(
+        in_fastq=args.in_fastq,
+        out_fasta=args.out_fasta,
+        out_alignment_clustalw=args.out_alignment_clustalw,
+        sample_size=args.sample_size,
+        msa_sample_size=args.msa_sample_size,
+        skip_consensus=args.skip_consensus,
+        seed=args.seed,
+        method_2=args.method_2,
+        model=args.model
+   )

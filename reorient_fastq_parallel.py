@@ -8,9 +8,11 @@ from multiprocessing import Pool
 import subprocess
 import read_reorientation_barplot as plt
 import logging
-import parse_config as pc
+import utilities.parse_config as pc
 import shutil
 import time
+# project-specific imports
+import utilities.utilities as util
 
 
 logging.basicConfig(
@@ -24,28 +26,29 @@ logging.basicConfig(
     ]
 )
 
-# check if docker environment
-# note: this method may not always be reliable
-def is_docker_env():
+def gzip_file(input_file):
+    if not os.path.exists(input_file):
+        logging.error(f"Input file {input_file} does not exist.")
+        raise FileNotFoundError(f"Input file {input_file} does not exist.")
+    temp_file = f"{input_file}.tmp"
     try:
-        with open('/proc/1/cgroup', 'rt') as f:
-            return 'docker' in f.read()
-    except FileNotFoundError:
-        return False
-
-def check_pigz():
-    try:
-        result = subprocess.run(["pigz", "--version"], capture_output=True, text=True)
-        if result.returncode == 0:
-            version_line = result.stdout.split('\n')[0]
-            version = version_line.split()[1]
-            logging.info(f"pigz version: {version}")
-            return True
+        with open(input_file, 'rb') as f_in, open(temp_file, 'wb') as f_out:
+            shutil.copyfileobj(f_in, f_out)
+        if not os.path.exists(temp_file):
+            logging.error(f"Temporary file {temp_file} was not created.")
+            raise FileNotFoundError(f"Temporary file {temp_file} was not created.")
+        if pigz_available:
+            gzip = "pigz"
         else:
-            raise FileNotFoundError
-    except FileNotFoundError:
-        logging.warning("pigz is not available. Falling back to gzip.")
-        return False
+            gzip = "gzip"
+        gzip_command = f"{gzip} {temp_file}"
+        subprocess.run(gzip_command, shell=True, check=True)
+        shutil.move(f"{temp_file}.gz", f"{input_file}.gz")
+    except Exception as e:
+        logging.error(f"Failed to gzip file {input_file}: {e}")
+        if os.path.exists(temp_file):
+            os.remove(temp_file)
+        raise
 
 def check_fastq_file(file_path):
     if not os.path.exists(file_path):
@@ -154,18 +157,6 @@ def process_batch(batch, search_sequences_r1, search_sequences_r2):
         'count_r2_fwd': count_r2_fwd
     }
     return results, stats
-
-def gzip_file(input_file):
-    temp_file = f"{input_file}.tmp"
-    shutil.copy(input_file, temp_file)
-    if pigz_available:
-        gzip = "pigz"
-    else:
-        gzip = "gzip"
-    gzip_command = f"{gzip} {temp_file}"
-    command = f"nohup sh -c '{gzip_command} && mv {temp_file}.gz {input_file}.gz' >/dev/null 2>&1 &"
-    process = subprocess.Popen(command, shell=True)
-    return process
 
 def process_and_write(args):
     batch, search_sequences_r1, search_sequences_r2 = args
@@ -289,19 +280,167 @@ def check_file_exists(file_path, description):
         time.sleep(sleep_time)
     logging.error(f"Error: {description} {file_path} does not exist or is 0 bytes after multiple attempts.")
     sys.exit(1)
-def main():
+    
+def main(sequences_r1, sequences_r2, cpus, in_fastq_r1, in_fastq_r2, out_fastq_r1, out_fastq_r2, plot, plot_prefix, plot_search_sequence, plot_only, validate, batch_size=1000, chunk_size=1000000, nreads=None, file_interleaved_gz=None, config=None):
     global pigz_available
-    pigz_available = check_pigz()
+    pigz_available = util.pigz_available()
     global is_docker
-    is_docker = is_docker_env()
+    is_docker = util.is_docker_env()
+
+    if not in_fastq_r1 or not in_fastq_r2 or not out_fastq_r1 or not out_fastq_r2:
+        logging.error("Error: Missing required FASTQ file arguments.")
+        sys.exit(1)
+
+    if config:
+        config = pc.parse_config(config)
+        if is_docker:
+            output_dir = config['DOCKER_OUTPUT_DIR']
+        else:
+            output_dir = config['OUTPUT_DIR']
+    else:
+        output_dir = "output"
+
+    search_sequences_r1 = sequences_r1.upper().split(',')
+    search_sequences_r2 = sequences_r2.upper().split(',') if sequences_r2 else []
+
+    if not plot and plot_only:
+        logging.error("Error: --plot-only specified without --plot.")
+        sys.exit(1)
+
+    if not plot_only:
+        ncpu = int(cpus)
+        logging.info(f"Checking input FASTQ file {in_fastq_r1}")
+        check_fastq_file(in_fastq_r1)
+        logging.info(f"Checking input FASTQ file {in_fastq_r2}")
+        check_fastq_file(in_fastq_r2)
+
+        ncpu = int(cpus)
+
+        if not search_sequences_r1 or search_sequences_r1 == ['']:
+            raise ValueError("R1 sequences must not be empty.")
+        if not search_sequences_r2:
+            logging.warning("R2 sequences are empty (allowed).")
+
+        logging.info(f"R1 search sequences: {search_sequences_r1}")
+        logging.info(f"R2 search sequences: {search_sequences_r2}")
+
+        if file_interleaved_gz:
+            fastq_interleaved = re.sub(r'\.gz$', '', file_interleaved_gz)
+        else:
+            if "R1" in in_fastq_r1:
+                fastq_interleaved = re.sub(r'R1', 'interleaved', in_fastq_r1)
+                fastq_interleaved = re.sub(r'\.(fastq|fq)\.gz$', '.fq', fastq_interleaved)
+            else:
+                r1_prefix = re.sub(r'\.(fastq|fq)(\.gz)?$', '', in_fastq_r1)
+                fastq_interleaved = f"{r1_prefix}_interleaved.fq"
+            file_interleaved_gz = f"{fastq_interleaved}.gz"
+
+        if file_interleaved_gz != f"{fastq_interleaved}.gz":
+            logging.error("Error: file_interleaved_gz must be identical to fastq_interleaved with '.gz' appended.")
+            sys.exit(1)
+
+        out_r1_re_fastq = out_fastq_r1[:-3]
+        out_r2_re_fastq = out_fastq_r2[:-3]
+
+        if os.path.exists(out_fastq_r1) and os.path.getsize(out_fastq_r1) > 0 and \
+           os.path.exists(out_fastq_r2) and os.path.getsize(out_fastq_r2) > 0:
+            logging.info(f"Final output files {out_fastq_r1} and {out_fastq_r2} already exist and are not empty. Skipping processing.")
+        else:
+            if not (os.path.exists(fastq_interleaved) and os.path.getsize(fastq_interleaved) > 0):
+                logging.info(f"Interleaving FASTQ files {in_fastq_r1} and {in_fastq_r2} (using seqtk) ...")
+                interleave_seqtk(in_fastq_r1, in_fastq_r2, fastq_interleaved, nreads=nreads)
+                logging.info(f"Interleaved FASTQ written to {fastq_interleaved}")
+                gzip_file(fastq_interleaved)
+                logging.info(f"Interleaved FASTQ file {fastq_interleaved} or {file_interleaved_gz} already exists and is not empty.")
+
+            if not os.path.exists(file_interleaved_gz) or os.path.getsize(file_interleaved_gz) == 0:
+                logging.info(f"Compressing interleaved FASTQ file to {file_interleaved_gz}")
+                gzip_file(fastq_interleaved)
+
+            chunk_count = 0
+            while os.path.exists(f"{fastq_interleaved}.{chunk_count}"):
+                chunk_count += 1
+
+            if chunk_count == 0:
+                chunk_count = split_interleaved_file_seqtk(fastq_interleaved, chunk_size=chunk_size)
+            logging.info(f"{chunk_count} chunked files generated from {fastq_interleaved}")
+
+            if not (os.path.exists(out_r1_re_fastq) and os.path.getsize(out_r1_re_fastq) > 0) or \
+               not (os.path.exists(out_r2_re_fastq) and os.path.getsize(out_r2_re_fastq) > 0):
+                chunk_count = 0
+                while os.path.exists(f"{fastq_interleaved}.{chunk_count}"):
+                    chunk_file = f"{fastq_interleaved}.{chunk_count}"
+                    out_r1_chunk = f"{out_r1_re_fastq}.{chunk_count}"
+                    out_r2_chunk = f"{out_r2_re_fastq}.{chunk_count}"
+
+                    if not (os.path.exists(out_r1_chunk) and os.path.getsize(out_r1_chunk) > 0) or \
+                       not (os.path.exists(out_r2_chunk) and os.path.getsize(out_r2_chunk) > 0):
+                        total_stats = reorient_fastq(chunk_file, out_r1_chunk, out_r2_chunk, search_sequences_r1=search_sequences_r1, search_sequences_r2=search_sequences_r2, cpus=ncpu, batch_size=batch_size)
+                        for key, value in total_stats.items():
+                            logging.info(f"{key}: {value}")
+                    chunk_count += 1
+
+                with open(out_r1_re_fastq, 'w') as f1_out, open(out_r2_re_fastq, 'w') as f2_out:
+                    for i in range(chunk_count):
+                        with open(f"{out_r1_re_fastq}.{i}", 'r') as f1_in, open(f"{out_r2_re_fastq}.{i}", 'r') as f2_in:
+                            f1_out.writelines(f1_in.readlines())
+                            f2_out.writelines(f2_in.readlines())
+
+                logging.info(f"Reoriented FASTQ files written to {out_r1_re_fastq} and {out_r2_re_fastq}")
+                gzip_file(out_r1_re_fastq)
+                logging.info(f"Reoriented FASTQ files {out_r1_re_fastq} and {out_r2_re_fastq} already exist and are not empty.")
+
+            if not os.path.exists(out_fastq_r1) or os.path.getsize(out_fastq_r1) == 0:
+                if os.path.exists(out_r2_re_fastq) and os.path.getsize(out_r2_re_fastq) > 0:
+                    gzip_file(out_r2_re_fastq)
+                else:
+                    logging.error(f"Error: File {out_r2_re_fastq} does not exist or is empty.")
+                    raise FileNotFoundError(f"File {out_r2_re_fastq} does not exist or is empty.")
+                gzip_file(out_r1_re_fastq)
+
+            if not os.path.exists(out_fastq_r2) or os.path.getsize(out_fastq_r2) == 0:
+                logging.info(f"Compressing {out_r2_re_fastq} to {out_fastq_r2}")
+                gzip_file(out_r2_re_fastq)
+
+            for i in range(chunk_count):
+                os.remove(f"{fastq_interleaved}.{i}")
+                os.remove(f"{out_r1_re_fastq}.{i}")
+                os.remove(f"{out_r2_re_fastq}.{i}")
+
+            os.remove(fastq_interleaved)
+            os.remove(out_r1_re_fastq)
+            os.remove(out_r2_re_fastq)
+    else:
+        logging.info("Skipping read reorientation.")
+        input_fastq_files = [in_fastq_r1, in_fastq_r2, out_fastq_r1, out_fastq_r2]
+        for fastq_file in input_fastq_files:
+            if not os.path.exists(fastq_file):
+                logging.error(f"Error: Input FASTQ file {fastq_file} does not exist.")
+                sys.exit(1)
+            if os.path.getsize(fastq_file) == 0:
+                logging.error(f"Error: Input FASTQ file {fastq_file} is empty.")
+                sys.exit(1)
+
+    if validate:
+        logging.info("Validating FASTQ files...")
+        validate_fastq(fastq_files_orig=[in_fastq_r1, in_fastq_r2], fastq_files_re=[out_fastq_r1, out_fastq_r2])
+
+    if plot:
+        fastq_files = [in_fastq_r1, in_fastq_r2, out_fastq_r1, out_fastq_r2]
+        sequences = plot_search_sequence.upper().split(',') if plot_search_sequence else search_sequences_r1
+        plot_prefix = plot_prefix or f"{output_dir}/result"
+        plt.plot_positions(fastq_files, sequences=sequences, output_file_prefix=plot_prefix, n=100000)
+
+    logging.info("Finished.")
+
+if __name__ == "__main__":
 
     parser = argparse.ArgumentParser(description='Reorient FASTQ files.')
-    parser.add_argument('--config', type=str, help='Configuration file.')
+    parser.add_argument('--cpus','-p', type=int, default=1, help='Number of CPUs to use (default: 1). Must be a positive integer.')
 
     parser.add_argument('--sequences-r1', '--seq-r1', type=str, required=True, help='Search sequences for R1 (comma-separated)')
     parser.add_argument('--sequences-r2', '--seq-r2', type=str, required=True, help='Search sequences for R2 (comma-separated)')
 
-    parser.add_argument('--cpus','-p', type=int, default=1, help='Number of CPUs to use (default: 1).')
     parser.add_argument('--batch-size', '-b', type=int, default=1000, help='Batch size for processing (default: 1000).')
     parser.add_argument('--chunk-size', '-c', type=int, default=1000000, help='Chunk size for splitting interleaved file (default: 1000000).')
     parser.add_argument('--nreads', '-n', type=int, default=None, help='Number of reads to process (default: all).')
@@ -311,7 +450,7 @@ def main():
     parser.add_argument('--out-fastq-r1', '--out-r1', type=str, required=True, help='Output reoriented R1 FASTQ file (gzipped).')
     parser.add_argument('--out-fastq-r2', '--out-r2', type=str, required=True, help='Output reoriented R2 FASTQ file (gzipped).')
 
-    parser.add_argument('--file-interleaved-gz', '--int', '--interleaved-fastq', type=str, help='Output interleaved FASTQ file (gzipped).')
+    parser.add_argument('--file-interleaved-gz', '--int', '--interleaved-fastq', type=str, default=None, help='Output interleaved FASTQ file (gzipped).')
 
     parser.add_argument('--plot', action='store_true', help='Plot sequence type proportions.')
     parser.add_argument('--plot-prefix', type=str, help='Prefix for plot files.')
@@ -322,241 +461,20 @@ def main():
 
     args = parser.parse_args()
 
-    if len(sys.argv) == 1:
-        parser.print_help(sys.stderr)
-        sys.exit(1)
-
-    if len(sys.argv) == 1:
-        parser.print_help(sys.stderr)
-        sys.exit(1)
-
-    if not args.in_fastq_r1 or not args.in_fastq_r2 or not args.out_fastq_r1 or not args.out_fastq_r2:
-        logging.error("Error: Missing required FASTQ file arguments.")
-        sys.exit(1)
-        config = pc.parse_config(args.config)
-        if is_docker:
-            output_dir = config['DOCKER_OUTPUT_DIR']
-        else:
-            output_dir = config['OUTPUT_DIR']
-        
-    search_sequences_r1 = args.sequences_r1.upper().split(',')
-    search_sequences_r2 = args.sequences_r2.upper().split(',') if args.sequences_r2 else []
-
-    if not args.plot and args.plot_only:
-        logging.error("Error: --plot-only specified without --plot.")
-        sys.exit(1)
-
-    if not args.plot_only:
-
-        logging.info(f"Checking input FASTQ file {args.in_fastq_r1}")
-        check_fastq_file(args.in_fastq_r1)
-        logging.info(f"Checking input FASTQ file {args.in_fastq_r2}")
-        check_fastq_file(args.in_fastq_r2)
-
-        ncpu = args.cpus
-        batch_size = args.batch_size
-        nreads = args.nreads
-
-        if not search_sequences_r1 or search_sequences_r1 == ['']:
-            raise ValueError("R1 sequences must not be empty.")
-        if not search_sequences_r2:
-            logging.warning("R2 sequences are empty (allowed).")
-
-        logging.info(f"R1 search sequences: {search_sequences_r1}")
-        logging.info(f"R2 search sequences: {search_sequences_r2}")
-
-        if args.file_interleaved_gz:
-            fastq_interleaved = re.sub(r'\.gz$', '', args.file_interleaved_gz)
-        else:
-            if "R1" in args.in_fastq_r1:
-                fastq_interleaved = re.sub(r'R1', 'interleaved', args.in_fastq_r1)
-                fastq_interleaved = re.sub(r'\.(fastq|fq)\.gz$', '.fq', fastq_interleaved)
-            else:
-                r1_prefix = re.sub(r'\.(fastq|fq)(\.gz)?$', '', args.in_fastq_r1)
-                fastq_interleaved = f"{r1_prefix}_interleaved.fq"
-            args.file_interleaved_gz = f"{fastq_interleaved}.gz"
-
-        # Verify that args.file_interleaved_gz is identical to fastq_interleaved with ".gz" appended
-        if args.file_interleaved_gz != f"{fastq_interleaved}.gz":
-            logging.error("Error: args.file_interleaved_gz must be identical to fastq_interleaved with '.gz' appended.")
-            sys.exit(1)
-
-        out_r1_re_fastq = args.out_fastq_r1[:-3]
-        out_r2_re_fastq = args.out_fastq_r2[:-3]
-
-        # Check if output files already exist and are not empty
-        if os.path.exists(args.out_fastq_r1) and os.path.getsize(args.out_fastq_r1) > 0 and \
-            os.path.exists(args.out_fastq_r2) and os.path.getsize(args.out_fastq_r2) > 0:
-            logging.info(f"Final output files {args.out_fastq_r1} and {args.out_fastq_r2} already exist and are not empty. Skipping processing.")
-            
-        else:
-            if not ((os.path.exists(fastq_interleaved) and os.path.getsize(fastq_interleaved) > 0) or \
-                (os.path.exists(args.file_interleaved_gz) and os.path.getsize(args.file_interleaved_gz) > 0)):
-                # with gzip.open(args.in_fastq_r1, "rt") as handle_r1, gzip.open(args.in_fastq_r2, "rt") as handle_r2, open(fastq_interleaved, "w") as handle_interleaved:
-                logging.info(f"Interleaving FASTQ files {args.in_fastq_r1} and {args.in_fastq_r2} (using seqtk) ...")
-                interleave_seqtk(args.in_fastq_r1, args.in_fastq_r2, fastq_interleaved, nreads=nreads)
-                logging.info(f"Interleaved FASTQ written to {fastq_interleaved}")
-            else:
-                logging.info(f"Interleaved FASTQ file {fastq_interleaved} or {args.file_interleaved_gz} already exists and is not empty.")
-
-            # gzip interleaved file if the gz version does not exist
-            if not os.path.exists(args.file_interleaved_gz) or os.path.getsize(args.file_interleaved_gz) == 0:
-                logging.info(f"Compressing interleaved FASTQ file to {args.file_interleaved_gz}")
-                gzip_interleaved_process = gzip_file(fastq_interleaved)
-
-            # Check if unzipped interleaved file exists and if not, unzip
-            if not os.path.exists(fastq_interleaved) or os.path.getsize(fastq_interleaved) == 0:
-                if os.path.exists(args.file_interleaved_gz) and os.path.getsize(args.file_interleaved_gz) > 0:
-                    logging.info(f"Unzipping {args.file_interleaved_gz} to {fastq_interleaved}")
-                    with gzip.open(args.file_interleaved_gz, 'rt') as f_in, open(fastq_interleaved, 'w') as f_out:
-                        f_out.writelines(f_in)
-                else:
-                    logging.error(f"Error: Interleaved gzipped file {args.file_interleaved_gz} does not exist or is empty.")
-                    sys.exit(1)
-
-            # Check if chunked files are present
-            chunk_count = 0
-            while os.path.exists(f"{fastq_interleaved}.{chunk_count}"):
-                chunk_count += 1
-
-            # If chunked files are not all present, generate them by splitting the interleaved file
-            if chunk_count == 0:
-                chunk_count = split_interleaved_file_seqtk(fastq_interleaved, chunk_size=args.chunk_size)
-            logging.info(f"{chunk_count} chunked files generated from {fastq_interleaved}")
-
-            if not (os.path.exists(out_r1_re_fastq) and os.path.getsize(out_r1_re_fastq) > 0) or \
-            not (os.path.exists(out_r2_re_fastq) and os.path.getsize(out_r2_re_fastq) > 0):
-                if os.path.exists(fastq_interleaved) and os.path.getsize(fastq_interleaved) > 0:
-                    interleaved_file = fastq_interleaved
-                elif os.path.exists(args.file_interleaved_gz) and os.path.getsize(args.file_interleaved_gz) > 0:
-                    interleaved_file = args.file_interleaved_gz
-                else:
-                    logging.error("Error: Interleaved FASTQ file not found.")
-                    sys.exit(1)
-                chunk_count = 0
-                logging.info(f"cpus: {ncpu}")
-                logging.info(f"batch size: {batch_size}")
-                total_chunk_count = 0
-                while os.path.exists(f"{interleaved_file}.{chunk_count}"):
-                    chunk_count += 1
-                    total_chunk_count += 1
-                chunk_count = 0
-                while os.path.exists(f"{interleaved_file}.{chunk_count}"):
-                    logging.info(f"Reorienting chunk file (.{chunk_count}) {chunk_count + 1 } of {total_chunk_count}...")
-                    chunk_file = f"{interleaved_file}.{chunk_count}"
-                    out_r1_chunk = f"{out_r1_re_fastq}.{chunk_count}"
-                    out_r2_chunk = f"{out_r2_re_fastq}.{chunk_count}"
-
-                    if not (os.path.exists(out_r1_chunk) and os.path.getsize(out_r1_chunk) > 0) or \
-                    not (os.path.exists(out_r2_chunk) and os.path.getsize(out_r2_chunk) > 0):
-                        total_stats = reorient_fastq(chunk_file, out_r1_chunk, out_r2_chunk, search_sequences_r1=search_sequences_r1, search_sequences_r2=search_sequences_r2, cpus=ncpu, batch_size=batch_size)
-                        # Print summary of total_stats
-                        for key, value in total_stats.items():
-                            logging.info(f"{key}: {value}")
-                    else:
-                        logging.info(f"Reoriented chunk files {out_r1_chunk} and {out_r2_chunk} already exist and are not empty.")
-
-                    chunk_count += 1
-                # Combine chunked output files into final output files
-                with open(out_r1_re_fastq, 'w') as f1_out, open(out_r2_re_fastq, 'w') as f2_out:
-                    for i in range(chunk_count):
-                        with open(f"{out_r1_re_fastq}.{i}", 'r') as f1_in, open(f"{out_r2_re_fastq}.{i}", 'r') as f2_in:
-                            f1_out.writelines(f1_in.readlines())
-                            f2_out.writelines(f2_in.readlines())
-                        # os.remove(f"{out_r1_re_fastq}.{i}")
-                        # os.remove(f"{out_r2_re_fastq}.{i}")
-
-                logging.info(f"Reoriented FASTQ files written to {out_r1_re_fastq} and {out_r2_re_fastq}")
-            else:
-                logging.info(f"Reoriented FASTQ files {out_r1_re_fastq} and {out_r2_re_fastq} already exist and are not empty.")
-
-            if os.path.exists(args.out_fastq_r1) and os.path.getsize(args.out_fastq_r1) > 0:
-                logging.warning(f"Warning: {args.out_fastq_r1} already exists and is not empty.")
-            else:
-                logging.info(f"Compressing {out_r1_re_fastq} to {args.out_fastq_r1}")
-                gzip_out_r1_process = gzip_file(out_r1_re_fastq)
-
-            if os.path.exists(args.out_fastq_r2) and os.path.getsize(args.out_fastq_r2) > 0:
-                logging.warning(f"Warning: {args.out_fastq_r2} already exists and is not empty.")
-            else:
-                logging.info(f"Compressing {out_r2_re_fastq} to {args.out_fastq_r2}")
-                gzip_out_r2_process = gzip_file(out_r2_re_fastq)
-
-            # # Remove auto-incremented chunk files and any non-gzipped FASTQ files
-            # for i in range(chunk_count):
-            #     chunk_file = f"{fastq_interleaved}.{i}"
-            #     if os.path.exists(chunk_file):
-            #         os.remove(chunk_file)
-            #     out_r1_chunk = f"{out_r1_re_fastq}.{i}"
-            #     if os.path.exists(out_r1_chunk):
-            #         os.remove(out_r1_chunk)
-            #     out_r2_chunk = f"{out_r2_re_fastq}.{i}"
-            #     if os.path.exists(out_r2_chunk):
-            #         os.remove(out_r2_chunk)
-
-            # if os.path.exists(fastq_interleaved):
-            #     os.remove(fastq_interleaved)
-            # if os.path.exists(out_r1_re_fastq):
-            #     os.remove(out_r1_re_fastq)
-            # if os.path.exists(out_r2_re_fastq):
-            #     os.remove(out_r2_re_fastq)
-    else:
-        logging.info("Skipping read reorientation.")
-        # Check all 4 input FASTQ files for existence and size > 0 bytes
-        input_fastq_files = [args.in_fastq_r1, args.in_fastq_r2, args.out_fastq_r1, args.out_fastq_r2]
-        for fastq_file in input_fastq_files:
-            if not os.path.exists(fastq_file):
-                logging.error(f"Error: Input FASTQ file {fastq_file} does not exist.")
-                sys.exit(1)
-            if os.path.getsize(fastq_file) == 0:
-                logging.error(f"Error: Input FASTQ file {fastq_file} is empty.")
-                sys.exit(1)
-
-    if 'gzip_out_r1_process' in locals() or 'gzip_out_r2_process' in locals() or 'gzip_interleaved_process' in locals():
-        logging.info("Waiting for gzip processes to finish...")
-        if 'gzip_out_r1_process' in locals():
-            if gzip_out_r1_process.wait() != 0:
-                logging.error("gzip process for R1 failed.")
-                sys.exit(1)
-            logging.info("    R1 finished...")
-        if 'gzip_out_r2_process' in locals():
-            if gzip_out_r2_process.wait() != 0:
-                logging.error("gzip process for R2 failed.")
-                sys.exit(1)
-            logging.info("    R2 finished...")
-        if 'gzip_interleaved_process' in locals():
-            if gzip_interleaved_process.wait() != 0:
-                logging.error("gzip process for interleaved file failed.")
-                sys.exit(1)
-            logging.info("    Interleaved finished.")
-            
-    # Check if the output files were produced as expected
-    check_file_exists(args.out_fastq_r1, "Output FASTQ file")
-    check_file_exists(args.out_fastq_r2, "Output FASTQ file")
-    check_file_exists(args.file_interleaved_gz, "Interleaved FASTQ file")
-
-    if args.validate:
-        logging.info("Validating FASTQ files...")
-        validate_fastq(fastq_files_orig = [args.in_fastq_r1, args.in_fastq_r2], fastq_files_re = [args.out_fastq_r1, args.out_fastq_r2])
-
-    if args.plot:
-        # NB: order is important.  Plot script will use file names to help, otherwise it will assume order is R1, R2, R1-reoriented, R2-reoriented.
-        fastq_files = [args.in_fastq_r1, args.in_fastq_r2, args.out_fastq_r1, args.out_fastq_r2]
-
-        if args.plot_search_sequence:
-            sequences = args.plot_search_sequence.upper().split(',')
-        elif search_sequences_r1:
-            # use all of the r1 sequences
-            sequences = search_sequences_r1
-        else:
-            logging.error("Error: no search sequence available.  Either set --plot-search-sequence or --sequences-r1.")
-            sys.exit(1)
-        if args.plot_prefix:
-            plot_prefix = args.plot_prefix
-        else:
-            plot_prefix = f"{output_dir}/result"
-        plt.plot_positions(fastq_files, sequences = sequences, output_file_prefix=plot_prefix, n=100000)
-    logging.info("Finished.")    
-
-if __name__ == "__main__":
-    main()
+    main(sequences_r1=args.sequences_r1,
+        sequences_r2=args.sequences_r2,
+        cpus=args.cpus,
+        nreads=args.nreads,
+        batch_size=args.batch_size,
+        chunk_size=args.chunk_size,
+        in_fastq_r1=args.in_fastq_r1,
+        in_fastq_r2=args.in_fastq_r2,
+        out_fastq_r1=args.out_fastq_r1,
+        out_fastq_r2=args.out_fastq_r2,
+        file_interleaved_gz=args.file_interleaved_gz,
+        plot=args.plot,
+        plot_prefix=args.plot_prefix,
+        plot_search_sequence=args.plot_search_sequence,
+        plot_only=args.plot_only,
+        validate=args.validate
+        )
