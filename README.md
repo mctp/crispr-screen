@@ -7,21 +7,19 @@ This analysis pipeline takes in sequence data (paired-end fastq files) containin
 
 A main feature of this repository is `reorient_fastq_parallel.py` which corrects fastq files where DNA fragments were sequenced in both forward and reverse directions, i.e. the "forward" end may be in either R1 or R2.   In its current form, MaGeCK assumes all (R1) reads originate from the same end of the amplicon.  While MaGeCK is capable of using R2 to aid in finding sgRNA sequences, it will search R2 only as the reverse complement of what it is searching for in R1.  A QC tool, `find_top_sequences.py`, is included to help determine whether read reorientation is necessary.
 
-# software requirements
+# software requirements (this list is not exhaustive; check out docker/env.yaml)
 * mageck 0.5.9.5
 * clustalw 2.1
 * seqtk 1.4
 * Python 3.9
 * Python packages:
-  * scipy
-  * numpy
   * pyyaml
-  * pandas
   * Biopython
   * termcolor
   * scikit-learn
   * matplotlib
-  * pytest
+  * scipy
+  * numpy
 * R 3.4
 * R packages
   * tidyverse
@@ -29,19 +27,17 @@ A main feature of this repository is `reorient_fastq_parallel.py` which corrects
   * org.Hs.eg.db
   * ggrepel
   * GGally
-
-# software requirements (cmd line utilities)
-* column (from util-linux package)
-* gawk (awk pretending to be gawk will work)
-* file
-* jq
-* yq
-* cmake
-
-# software requirements (alignment/BAM mode)
-* bowtie2 2.4.5 (2.5.2 ok)
-* samtools 1.6 (1.18 ok)
-* cutadapt 4.1 (4.5 ok)
+* system/cmd line utilities
+  * column (from util-linux package)
+  * gawk (awk pretending to be gawk will work)
+  * file
+  * jq
+  * yq
+  * cmake
+* alignment/BAM mode requirements (optional for fastq mode)
+  * bowtie2 2.4.5 (2.5.2 ok)
+  * samtools 1.6 (1.18 ok)
+  * cutadapt 4.1 (4.5 ok)
 
 ## optional software
 * pigz
@@ -82,7 +78,7 @@ It will which will contain all the software needed as well as ensure the environ
   my_pipelines/crispr:0.1 \
   bash
   $ docker attach crispr-pipeline
-  (base) mambauser@397fd3feaf7b:/repo$ bash run_pipeline.sh
+  (base) mambauser@397fd3feaf7b:/repo$ python run_pipeline.py
   ```
 
 # pipeline setup
@@ -105,7 +101,7 @@ A Library ID.
   * **column 2** - sample
 A sample name/alias.  Short and readable withno spaces or special characters.  
   * **column 3** - fastq_r1
-A comma-separated list of fastq files for R1 (e.g. `library_lane1_R1.fq.gz,library_lane2_R1.fq.gz`). Full path or file name only are accepted. If file name only, fastq path (e.g. `input/`) must be set in `config.sh`.  
+A comma-separated list of fastq files for R1 (e.g. `library_lane1_R1.fq.gz,library_lane2_R1.fq.gz`). Full path or file name only are accepted. If file name only, fastq path (e.g. `input/`) must be set in `config.yaml`.  
   * **column 4** - fastq_r2
 A comma-separated list of fastq files for R2 (e.g. `library_lane1_R2.fq.gz,library_lane2_R2.fq.gz`).
 
@@ -115,14 +111,14 @@ A comma-separated list of fastq files for R2 (e.g. `library_lane1_R2.fq.gz,libra
   * `mkdir output`
 * copy fastq files into `input/`
 
-### 4. create configuration script called `config.sh`.  Edit as needed. 
-* Use the example as a template `examples/config.sh`. 
+### 4. create configuration script called `config.yaml`.  Edit as needed. 
+* Use the example as a template `examples/config.yaml`. 
 * Note: if running within a docker container, be sure to set docker-specific paths and options.
 * ensure input/output dirs are specified.
 
 ### 5. run pipeline
 
-* run the pipeline using: `bash run_pipeline.sh` in the repo directory. 
+* run the pipeline using: `python run_pipeline.py` in the repo directory. 
 * refer to MAGeCK documentation for interpreting the output of `mageck count` or `mageck test`.  
 
 
@@ -139,6 +135,7 @@ python find_top_sequences.py --in-fastq sample.fastq.gz
 * The output will consist of the top sequence classes, pruned at threshold 0.1 (must represent > 10% of the reads).
 * The output will also print a degenerate consensus sequence derived from a multiple sequence alignment (ClustalW)
 * It is recommended to run both R1 and R2 fastq files.
+* examine all parameters with `python find_top_sequences.py --help`
 
 ### B. Sampling
 
@@ -261,3 +258,8 @@ Rscript count_distribution_histogram.R
 * use `--skip-analysis` to stop processing data after running `mageck count`.  
 * use `--analysis-only` to perform the analysis without processing fastq and counting.  Often the counting process only needs to be done one time, but comparisons may be tried in different ways, depending on the experiment.
 * Comparisons are done with `mageck_analysis.sh` and currently only runs `mageck test` with options specified in the configuration file.  
+
+### misc
+* use `--help` with any python script to view command line parameters.
+* `run_pipeline.py` and `config.yaml` are superseding `run_pipeline.sh` and `config.sh` (respectively).
+* optimal settings for `reorient_fastq_parallel.py` are `--batch-size 1000` and `--chunk-size 1000000`.  `--cpus` should be set to something >1 where possible, such as 4, 8 or 16; using higher does not help much.  1M chunk size keeps memory overhead low.  these numbers were obtained empirically and so YMMV.  
