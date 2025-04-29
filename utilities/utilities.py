@@ -53,7 +53,7 @@ def load_config(quiet=False,config_file=''):
             config_file = "config.yml" if os.path.exists("config.yml") else "config.yaml"
         else:
             config_file = "config.sh"
-    config = pc.parse_config("config.sh", quiet)
+    config = pc.parse_config(config_file, quiet)
     config["config_file"] = config_file
     return config
 
