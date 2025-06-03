@@ -3,9 +3,13 @@ library(yaml)
 
 options(width = Sys.getenv("COLUMNS", unset = 80))
 # Function to parse config file and set environment variables
+library(conflicted)
+
 parse_config <- function(file) {
     if (grepl("\\.yaml$", file) || grepl("\\.yml$", file)) {
-        config <- yaml::read_yaml(file)
+        config_content <- readLines(file)
+        config_content <- gsub(":\\s*\\.$", ": \"./\"", config_content) # Replace '.' with './' only when '.' is at the end of the line
+        config <- yaml::yaml.load(paste(config_content, collapse = "\n"))
         names(config) <- tolower(names(config)) # Convert keys to lowercase
     } else {
         lines <- readLines(file, warn = FALSE)
@@ -46,8 +50,25 @@ parse_config <- function(file) {
     if (!grepl("\\.yaml$", file) && !grepl("\\.yml$", file)) {
         config <- lapply(config, function(value) resolve_references(value, config))
     }
+
+    # Handle "." values explicitly
+    config <- lapply(config, function(value) {
+        if (is.character(value)) {
+            value <- sapply(value, function(v) {
+                if (v == ".") {
+                    return(normalizePath(".", mustWork = FALSE)) # Interpret "." as current working directory
+                }
+                return(v)
+            }, USE.NAMES = FALSE)
+        }
+        return(value)
+    })
+
     return(config)
 }
+
+conflict_prefer("filter", "dplyr")
+conflict_prefer("select", "dplyr")
 
 resolve_references <- function(value, config) {
     if (is.character(value)) {
@@ -122,12 +143,15 @@ if (!file.exists(file_path)) {
 }
 df <- read.delim(file_path, sep = "\t", header = TRUE)
 
-    count_summary <- do.call(rbind, lapply(
-        meta$sample_original, function(x) {
-            df <- read.delim(paste(outdir, "/", x, "_", count_method, "/", x, "_", count_method, ".countsummary.txt", sep = ""), sep = "\t", header = TRUE)
-            return(df[, 1:8])
-        }
-    ))
+count_summary <- do.call(rbind, lapply(
+    meta$sample_original, function(x) {
+        df <- read.delim(paste(outdir, "/", x, "_", count_method, "/", x, "_", count_method, ".countsummary.txt", sep = ""), sep = "\t", header = TRUE)
+        df <- df[, 1:8]
+        colnames(df)[1] <- "Library" # Rename the first column to "Library"
+        df$Library <- gsub("_combined.*$", "", basename(df$Library)) # Modify values to extract the prefix before "_combined"
+        return(df)
+    }
+))
 count_summary$coverage <- count_summary$Mapped / count_summary$TotalsgRNAs
 
 cat(capture.output(print(count_summary)), sep = "\n")

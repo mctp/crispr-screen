@@ -220,16 +220,22 @@ def main():
         if skip_fastq_processing:
             logging.info("Skipping FASTQ processing.")
         else:
-            logging.info(f"merging {r1_space}")
-            logging.info(f"to: {in_r1_fastq}")
-            util.run_command(f"cat {r1_space} > {in_r1_fastq}")
+            if not os.path.exists(in_r1_fastq) or os.path.getsize(in_r1_fastq) == 0:
+                logging.info(f"merging {r1_space}")
+                logging.info(f"to: {in_r1_fastq}")
+                util.run_command(f"cat {r1_space} > {in_r1_fastq}")
+            else:
+                logging.info(f"Merged file {in_r1_fastq} exists.")
 
             if paired_end_fastq:
-                logging.info(f"merging {r2_space}")
-                logging.info(f"to: {in_r2_fastq}")
-                util.run_command(f"cat {r2_space} > {in_r2_fastq}")
+                if not os.path.exists(in_r2_fastq) or os.path.getsize(in_r2_fastq) == 0:
+                    logging.info(f"merging {r2_space}")
+                    logging.info(f"to: {in_r2_fastq}")
+                    util.run_command(f"cat {r2_space} > {in_r2_fastq}")
+                else:
+                    logging.info(f"Merged file {in_r2_fastq} exists.")
             else:
-                logging.warning("skipping R2 because paired_end_fastq is set to false.")
+            logging.warning("skipping R2 because paired_end_fastq is set to false.")
 
             fastq_stats_file = f"{output_dir}/fastq_stats.txt"
 

@@ -13,25 +13,17 @@ import sys
 import utilities.utilities as util
 
 def sample_sequences(fastq_file, sample_size=10, seed=None):
-    sampled_fastq = "sampled.fastq"
-    command = ["seqtk", "sample", fastq_file, str(sample_size)]
-    
-    if util.is_gzipped(fastq_file):
-        command.insert(2, "-z")
-
+    command = ["seqtk", "sample"]
     if seed is not None:
         command.extend(["-s", str(seed)])
-
+    command.extend([fastq_file, str(sample_size)])
+    
     result = subprocess.run(command, capture_output=True, text=True)
     if result.returncode != 0:
         raise RuntimeError(f"seqtk failed: {result.stderr}")
-
-    with open(sampled_fastq, "w") as f:
-        f.write(result.stdout)
-
-    with open(sampled_fastq, "rt") as handle:
-        sampled_sequences = list(SeqIO.parse(handle, "fastq"))
     
+    from io import StringIO
+    sampled_sequences = list(SeqIO.parse(StringIO(result.stdout), "fastq"))
     return sampled_sequences
 
 def write_fasta(sequences, output_file):
@@ -51,7 +43,8 @@ def get_consensus(alignment):
     consensus = motif.degenerate_consensus
     return consensus
 
-def determine_sequence_classes(sequences, threshold=0.9, min_fraction=0.1):
+def determine_sequence_classes(sequences, threshold=0.9, min_fraction=0.1,lump_low_represented=True):
+    
     sequence_classes = []
     total_sequences = len(sequences)
     
@@ -65,8 +58,18 @@ def determine_sequence_classes(sequences, threshold=0.9, min_fraction=0.1):
         if not added:
             sequence_classes.append([(seq, None)])
     
-    # Prune classes with low representation
-    pruned_classes = [seq_class for seq_class in sequence_classes if len(seq_class) / total_sequences >= min_fraction]
+    if lump_low_represented:
+        # Separate low-represented classes
+        low_represented = [seq_class for seq_class in sequence_classes if len(seq_class) / total_sequences < min_fraction]
+        pruned_classes = [seq_class for seq_class in sequence_classes if len(seq_class) / total_sequences >= min_fraction]
+        
+        # Lump low-represented classes into a single "other" group
+        if low_represented:
+            other_group = [seq for seq_class in low_represented for seq in seq_class]
+            pruned_classes.append(other_group)
+    else:
+        # Prune classes with low representation
+        pruned_classes = [seq_class for seq_class in sequence_classes if len(seq_class) / total_sequences >= min_fraction]
     
     return pruned_classes
 
@@ -118,22 +121,26 @@ def load_model_and_classify(sequences, model_filename='dna_classifier.joblib', m
 
     return sequence_classes
 
-def assign_representative_sequences(sequence_classes):
+def assign_representative_sequences(sequence_classes, lump_low_represented=True):
     representative_sequences = []
-    for seq_class in sequence_classes:
-        sequence_counts = {}
-        for item in seq_class:
-            seq = item[0]
-            seq_str = str(seq.seq)
-            if seq_str in sequence_counts:
-                sequence_counts[seq_str] += 1
-            else:
-                sequence_counts[seq_str] = 1
-        most_frequent_sequence = max(sequence_counts, key=sequence_counts.get)
-        representative_sequences.append(most_frequent_sequence)
+    for i, seq_class in enumerate(sequence_classes):
+        if lump_low_represented and i == len(sequence_classes) - 1:
+            # Assume the last list element is the lumped "other" group
+            representative_sequences.append("other")
+        else:
+            sequence_counts = {}
+            for item in seq_class:
+                seq = item[0]
+                seq_str = str(seq.seq)
+                if seq_str in sequence_counts:
+                    sequence_counts[seq_str] += 1
+                else:
+                    sequence_counts[seq_str] = 1
+            most_frequent_sequence = max(sequence_counts, key=sequence_counts.get)
+            representative_sequences.append(most_frequent_sequence)
     return representative_sequences
 
-def find_top_sequences(in_fastq, out_fasta, out_alignment_clustalw=None, sample_size=1000, msa_sample_size=200, skip_consensus=False, seed=None, method_2=False, model=None):
+def find_top_sequences(in_fastq, out_fasta, out_alignment_clustalw=None, sample_size=1000, msa_sample_size=200, skip_consensus=False, seed=None, method_2=False, model=None, min_fraction=0.1,low_represented=True):
     try:
         from termcolor import colored
         termcolor_available = True
@@ -153,13 +160,14 @@ def find_top_sequences(in_fastq, out_fasta, out_alignment_clustalw=None, sample_
         out_alignment_clustalw = base_name + ".aln"
 
     sampled_sequences = sample_sequences(in_fastq, sample_size=sample_size, seed=seed)
+    logging.info(f"Number of sampled sequences: {len(sampled_sequences)}")
     write_fasta(sampled_sequences, out_fasta)
 
     if method_2:
         if model:
-            sequence_classes = load_model_and_classify(sampled_sequences, model_filename=model)
+            sequence_classes = load_model_and_classify(sampled_sequences, model_filename=model, min_fraction=min_fraction)
         else:
-            sequence_classes = load_model_and_classify(sampled_sequences)
+            sequence_classes = load_model_and_classify(sampled_sequences, min_fraction=min_fraction)
         ood_sequences = [seq for seq_class in sequence_classes for seq, _, ood in seq_class if ood]
         logging.info(f"Number of OOD sequences: {len(ood_sequences)} ({len(ood_sequences) / len(sampled_sequences):.2%})")
         filtered_sequence_classes = []
@@ -174,10 +182,15 @@ def find_top_sequences(in_fastq, out_fasta, out_alignment_clustalw=None, sample_
         original_sequence_classes = sequence_classes
         sequence_classes = filtered_sequence_classes
     else:
-        sequence_classes = determine_sequence_classes(sampled_sequences)
+        sequence_classes = determine_sequence_classes(sampled_sequences, threshold=0.9, min_fraction=min_fraction, lump_low_represented=low_represented)
         original_sequence_classes = sequence_classes
 
-    representative_sequences = assign_representative_sequences(sequence_classes)
+    if method_2 and low_represented:
+        # Create an additional class for OOD sequences
+        ood_class = [(seq, "OOD") for seq in ood_sequences]
+        sequence_classes.append(ood_class)
+
+    representative_sequences = assign_representative_sequences(sequence_classes, lump_low_represented=low_represented)
 
     logging.info(f"Number of sequence classes: {len(sequence_classes)}")
     for i, seq_class in enumerate(sequence_classes):
@@ -242,8 +255,9 @@ if __name__ == "__main__":
     parser.add_argument("--msa-sample-size", type=int, default=200, help="Number of sequences to sample for MSA.")
     parser.add_argument("--skip-consensus", action="store_true", help="Skip ClustalW alignment and consensus generation. Use if ClustalW is not available.")
     parser.add_argument("--seed", type=int, help="Seed for random sampling")
-    parser.add_argument("--method-2", action="store_true", help="Use the second method to classify sequences")
+    parser.add_argument("--method-2", action="store_true", help="Use method 2 to classify sequences.")
     parser.add_argument('--model', help='Filename of trained model.')
+    parser.add_argument("--min-fraction", type=float, default=0.1, help="Minimum fraction of sequences to preserve in a class.")
     args = parser.parse_args()
 
     find_top_sequences(
@@ -255,5 +269,6 @@ if __name__ == "__main__":
         skip_consensus=args.skip_consensus,
         seed=args.seed,
         method_2=args.method_2,
-        model=args.model
-   )
+        model=args.model,
+        min_fraction=args.min_fraction
+    )

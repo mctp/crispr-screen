@@ -1,9 +1,9 @@
 # user generated files folders
 output/
 input/
-config.sh
-config.yaml
-config.yml
-sample_metadata.txt
-sample_metadata.yaml
-sample_metadata.yml
+/config.sh
+/config.yaml
+/config.yml
+/sample_metadata.txt
+/sample_metadata.yaml
+/sample_metadata.yml
