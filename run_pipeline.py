@@ -235,7 +235,7 @@ def main():
                 else:
                     logging.info(f"Merged file {in_r2_fastq} exists.")
             else:
-            logging.warning("skipping R2 because paired_end_fastq is set to false.")
+                logging.warning("skipping R2 because paired_end_fastq is set to false.")
 
             fastq_stats_file = f"{output_dir}/fastq_stats.txt"
 
