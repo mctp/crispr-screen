@@ -104,6 +104,24 @@ if (experiment_name != "") {
     experiment_prefix <- paste0(experiment_name, "_")
 }
 
+# Auto-detect metadata file with priority order
+metadata_file <- Sys.getenv("METADATA_FILE")
+if (metadata_file == "" || !file.exists(metadata_file)) {
+  # Check config file for metadata_file setting first
+  if (exists("config") && !is.null(config$metadata_file)) {
+    metadata_file <- config$metadata_file
+  } else {
+    # Auto-detect: prefer YAML, fallback to TXT
+    if (file.exists("sample_metadata.yaml")) {
+      metadata_file <- "sample_metadata.yaml"
+    } else if (file.exists("sample_metadata.txt")) {
+      metadata_file <- "sample_metadata.txt"
+    } else {
+      stop("Neither sample_metadata.yaml nor sample_metadata.txt found.")
+    }
+  }
+}
+
 if (is.null(config[['metadata_file']]) || !file.exists(config[['metadata_file']])) {
     stop("Error: metadata_file is not defined or does not exist in the configuration.")
 }

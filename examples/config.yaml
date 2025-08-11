@@ -59,7 +59,7 @@ docker_fastq_dir: /input   # this dir must exist as a mounted volume in the dock
 output_dir: output         # this dir must exist
 docker_output_dir: /output # this dir must exist as a mounted volume in the docker container
 
-metadata_file: sample_metadata.txt # see examples
+metadata_file: sample_metadata.yaml # see examples - YAML preferred, but old TXT format is still supported
 
 ##############################
 ####   sgRNA references   ####
@@ -180,18 +180,49 @@ trim_seq: TAGCCTTATTTTAACTTGCTATTTCTAGCTCTAAAAC # trim sequence is 5' vector seq
 ##                                                       ##
 ##-------------------------------------------------------##
 
-experiment_name: sampled_treatment_vs_DMSO # if empty, defaults to "experiment""
+experiment_name: treatment_vs_DMSO # if empty, defaults to "experiment""
 control_gene_id: Non_Targeting_Control # leave empty to use non-essential genes
-count_matrix_file: output/sampled_treatment_vs_DMSO_sgrna_count_matrix.txt
-# if empty, assume <output_dir>/<experiment_name>_sgrna_cpm_matrix.txt  
-# be sure to run cpm_matrix.py to generate the cpm matrix file
 
-control_sample: DMSO_sampled_1
-treatment_sample: treatment_sampled_1
+# Analysis method: auto (detect from config), rra, mle, or both
+analysis_method: auto
+
+count_matrix_file: output/treatment_vs_DMSO_sgrna_count_matrix.txt
+cpm_matrix_file: output/treatment_vs_DMSO_sgrna_cpm_matrix.txt
+# if empty, assume <output_dir>/<experiment_name>_sgrna_count_matrix.txt and _cpm_matrix.txt
+# be sure to run cpm_matrix.py to generate these matrix files
+
+control_sample: DMSO_1
+treatment_sample: treatment_1
 remove_zero_method: any
 normalization_method: # median is default, mageck recommends using total when median is unstable due to too many zeroes
+
+# RRA analysis: Define pairwise comparisons
 comparisons:
   - treatment_1:DMSO_1
+
+# Optional: RRA sgRNA filtering parameters
+rra_min_count: 10           # Minimum count threshold for sgRNA filtering
+rra_min_count_method: any   # Filtering method: any, all, control
+
+# MLE analysis: Define design matrices for complex experimental designs
+
+# MLE-specific parameters
+mle_threads: 32              # Number of threads for MLE (defaults to ncpu if not set)
+mle_permutations: 10         # Number of permutation rounds
+
+# configure the following for MLE analysis:
+design_matrices:
+  - analysis_name: "treatment_vs_control"
+    samples: ["DMSO_1", "DMSO_2", "treatment_1", "treatment_2"]
+    conditions:
+      - name: "baseline"
+        values: [1, 1, 1, 1]  # intercept
+      - name: "treatment_effect" 
+        values: [0, 0, 1, 1]  # treatment effect
+
+# Optional: MLE sgRNA filtering parameters
+# sgrna_min_count: 30       # Minimum count threshold
+# sgrna_min_sample: "DMSO_1" # Sample(s) that must meet threshold
 
 ## note: below varables are for development use currently
 

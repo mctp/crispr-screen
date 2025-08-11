@@ -91,7 +91,20 @@ def main():
 
     generate_references_cmd_opts = ""
 
-    metadata_file = config.get("metadata_file", config.get("METADATA_FILE", "sample_metadata.txt"))
+    # Auto-detect metadata file format (prefer YAML, fallback to TXT)
+    metadata_file = config.get("metadata_file", config.get("METADATA_FILE", None))
+    if metadata_file is None:
+        if os.path.exists("sample_metadata.yaml"):
+            metadata_file = "sample_metadata.yaml"
+        elif os.path.exists("sample_metadata.txt"):
+            metadata_file = "sample_metadata.txt"
+        else:
+            logging.error("Neither sample_metadata.yaml nor sample_metadata.txt found.")
+            logging.error("Please create a metadata file or specify one in the config.")
+            sys.exit(1)
+    
+    logging.info(f"Using metadata file: {metadata_file}")
+    
     config_file = config.get("config_file", "config.sh")
 
     global docker_paths
@@ -475,12 +488,14 @@ def main():
         logging.info("Skipping matrix generation.")
     else:
         logging.info("building count and cpm matrix files...")
-        cpm_matrix_output = cpm.count_and_cpm_matrix(config_file=config_file)
+        # For cpm_matrix.py - explicitly pass the detected metadata file
+        cpm_matrix_output = cpm.count_and_cpm_matrix(config_file=config_file, metadata_file=metadata_file)
         if cpm_matrix_output:
             for line in cpm_matrix_output.splitlines():
                 logging.info(line)
         logging.info("plotting count distribution histograms...")
-        histogram_output = util.run_command(f"Rscript {working_dir}/count_distribution_histograms.R")
+        # For count_distribution_histograms.R - pass metadata file as environment variable
+        histogram_output = util.run_command(f"METADATA_FILE={metadata_file} Rscript {working_dir}/count_distribution_histograms.R")
         if histogram_output:
             for line in histogram_output.splitlines():
                 logging.info(line)
