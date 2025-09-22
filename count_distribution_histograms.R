@@ -88,6 +88,9 @@ is_docker <- function() {
     file.exists("/.dockerenv")
 }
 
+# Null-coalescing operator helper
+`%||%` <- function(a, b) if (is.null(a)) b else a
+
 # Parse the config.yaml file if it exists, otherwise try config.sh
 if (file.exists("config.yaml")) {
     config <- parse_config("config.yaml")
@@ -122,13 +125,100 @@ if (metadata_file == "" || !file.exists(metadata_file)) {
   }
 }
 
-if (is.null(config[['metadata_file']]) || !file.exists(config[['metadata_file']])) {
-    stop("Error: metadata_file is not defined or does not exist in the configuration.")
+# Use the detected metadata file instead of config[['metadata_file']]
+if (!file.exists(metadata_file)) {
+    stop(paste("Error: metadata_file does not exist:", metadata_file))
 }
-meta <- read.delim(config[['metadata_file']], sep = "\t", header = TRUE, comment.char = "#")
+
+# Handle both YAML and TXT metadata formats
+if (grepl("\\.yaml$", metadata_file) || grepl("\\.yml$", metadata_file)) {
+    # For YAML format, we need to parse it differently
+    library(yaml)
+    metadata_yaml <- yaml.load_file(metadata_file)
+    
+    # Extract sample information from YAML structure
+    if ("samples" %in% names(metadata_yaml)) {
+        samples_list <- metadata_yaml$samples
+        
+        # Debug: Print the structure of samples_list
+        cat("Debug: Number of samples found:", length(samples_list), "\n")
+        for (i in seq_along(samples_list)) {
+            cat("Sample", i, "fields:", names(samples_list[[i]]), "\n")
+        }
+        
+        # Create vectors more explicitly to debug the issue
+        library_vec <- character(length(samples_list))
+        sample_vec <- character(length(samples_list))
+        fastq_r1_vec <- character(length(samples_list))
+        fastq_r2_vec <- character(length(samples_list))
+        
+        for (i in seq_along(samples_list)) {
+            x <- samples_list[[i]]
+            
+            # Library field
+            library_vec[i] <- if (is.null(x$library)) "" else as.character(x$library)
+            
+            # Sample field
+            sample_vec[i] <- if (is.null(x$sample)) "" else as.character(x$sample)
+            
+            # FastQ R1 field
+            r1 <- x$fastq_r1
+            if (is.null(r1)) {
+                fastq_r1_vec[i] <- ""
+            } else if (is.list(r1)) {
+                fastq_r1_vec[i] <- paste(unlist(r1), collapse = ",")
+            } else {
+                fastq_r1_vec[i] <- paste(as.character(r1), collapse = ",")
+            }
+            
+            # FastQ R2 field
+            r2 <- x$fastq_r2
+            if (is.null(r2)) {
+                fastq_r2_vec[i] <- ""
+            } else if (is.list(r2)) {
+                fastq_r2_vec[i] <- paste(unlist(r2), collapse = ",")
+            } else {
+                fastq_r2_vec[i] <- paste(as.character(r2), collapse = ",")
+            }
+        }
+        
+        # Debug: Print vector lengths
+        cat("Vector lengths - library:", length(library_vec), 
+            "sample:", length(sample_vec), 
+            "fastq_r1:", length(fastq_r1_vec), 
+            "fastq_r2:", length(fastq_r2_vec), "\n")
+        
+        # Create data frame
+        meta <- data.frame(
+            library = library_vec,
+            sample = sample_vec,
+            fastq_r1 = fastq_r1_vec,
+            fastq_r2 = fastq_r2_vec,
+            stringsAsFactors = FALSE
+        )
+        
+        # Debug: Print the resulting data frame structure
+        cat("Meta data frame structure:\n")
+        print(str(meta))
+        print(meta)
+        
+    } else {
+        stop("YAML metadata file does not contain 'samples' section")
+    }
+} else {
+    # For TXT format
+    meta <- read.delim(metadata_file, sep = "\t", header = TRUE, comment.char = "#")
+}
+
+# Check if sample column exists before trying to mutate
+if (!"sample" %in% colnames(meta)) {
+    stop(paste("Error: 'sample' column not found in metadata file:", metadata_file, 
+               "\nAvailable columns:", paste(colnames(meta), collapse = ", ")))
+}
+
 meta <- meta %>%
-    mutate(sample_original = sample, # Preserve original sample names
-           sample = gsub("-", ".", sample)) # Create a modified version for other operations
+    mutate(sample_original = .data[["sample"]], # Preserve original sample names using explicit column reference
+           sample = gsub("-", ".", .data[["sample"]])) # Create a modified version for other operations
 
 if (is.null(config[['orig_sgrna_list_file']]) || !file.exists(config[['orig_sgrna_list_file']])) {
     stop("Error: orig_sgrna_list_file is not defined or does not exist in the configuration.")
@@ -137,8 +227,6 @@ sgrnas <- read.delim(config[['orig_sgrna_list_file']], sep = "\t", header = TRUE
 
 count_method <- config[['mode']]
 outdir <- config[['output_dir']]
-
-sgrnas <- read.delim(config[['orig_sgrna_list_file']], sep = "\t", header = TRUE)
 
 # Define 'x' based on the metadata file
 if ("sample_original" %in% colnames(meta)) {
@@ -162,14 +250,23 @@ if (!file.exists(file_path)) {
 df <- read.delim(file_path, sep = "\t", header = TRUE)
 
 count_summary <- do.call(rbind, lapply(
-    meta$sample_original, function(x) {
-        df <- read.delim(paste(outdir, "/", x, "_", count_method, "/", x, "_", count_method, ".countsummary.txt", sep = ""), sep = "\t", header = TRUE)
+    unique(meta$sample_original), function(x) {  # Use unique() to avoid duplicates
+        count_file_path <- file.path(outdir, paste0(x, "_", count_method), paste0(x, "_", count_method, ".countsummary.txt"))
+        if (!file.exists(count_file_path)) {
+            warning(paste("Count summary file not found for sample:", x, "- skipping"))
+            return(NULL)
+        }
+        df <- read.delim(count_file_path, sep = "\t", header = TRUE)
         df <- df[, 1:8]
         colnames(df)[1] <- "Library" # Rename the first column to "Library"
         df$Library <- gsub("_combined.*$", "", basename(df$Library)) # Modify values to extract the prefix before "_combined"
         return(df)
     }
 ))
+
+# Remove any NULL entries from the list
+count_summary <- count_summary[!is.null(count_summary), ]
+
 count_summary$coverage <- count_summary$Mapped / count_summary$TotalsgRNAs
 
 cat(capture.output(print(count_summary)), sep = "\n")
@@ -191,7 +288,13 @@ if (!file.exists(cpm_matrix_file)) {
     stop(paste("Error: CPM matrix file not found -", cpm_matrix_file))
 }
 sgrna_cpm.df <- read.delim(cpm_matrix_file, sep = "\t", header = TRUE)
-meta.2 <- left_join(meta,count_summary,by=c("sample"="Label"))
+
+# Check the structure of count_summary and meta to debug the join
+cat("Meta sample column:", paste(meta$sample, collapse = ", "), "\n")
+cat("Count summary Label column:", paste(count_summary$Label, collapse = ", "), "\n")
+
+# Perform the join with explicit relationship handling
+meta.2 <- left_join(meta, count_summary, by = c("sample" = "Label"), relationship = "many-to-one")
 
 # Print experiment name and prefix for debugging
 cat("Experiment Name:", experiment_name, "\n")

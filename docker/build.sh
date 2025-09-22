@@ -4,7 +4,7 @@ source config.sh
 
 docker_build_working_dir="./docker"
 my_dockerfile="$docker_build_working_dir/Dockerfile"
-image_name="bmagnuso/crispr:0.0.11"
+image_name="bmagnuso/crispr:0.0.17"
 
 DOCKER_BUILDKIT=1 \time \
 	-v docker build \

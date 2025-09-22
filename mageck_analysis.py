@@ -90,47 +90,80 @@ def check_mle_output_exists(mle_dir, mle_prefix):
     return os.path.exists(gene_summary_file) and os.path.exists(sgrna_summary_file)
 
 def filter_sgrnas_for_rra(config, count_matrix_file, treatment_sample, control_sample):
-    """Filter sgRNAs for RRA analysis based on rra_min_count and rra_min_count_method"""
+    """Filter sgRNAs for RRA analysis based on rra_min_count, rra_min_cpm, and rra_min_count_method.
+    If rra_min_cpm is set, use CPM matrix (compute if needed, or load if exists).
+    If both are set, prefer count filtering for backward compatibility.
+    """
     rra_min_count = config.get('rra_min_count')
+    rra_min_cpm = config.get('rra_min_cpm')
     rra_min_count_method = config.get('rra_min_count_method', 'any')
-    
-    # If no filtering parameters specified, return None (no filtering)
-    if not rra_min_count:
+
+    # If neither filtering parameter is specified, return None (no filtering)
+    if not rra_min_count and not rra_min_cpm:
         return None
-    
-    # Load count matrix
+
+    # Prefer count filtering if both are set
+    use_cpm = False
+    threshold = None
+    matrix_file = count_matrix_file
+
+    if rra_min_count:
+        threshold = rra_min_count
+        use_cpm = False
+        matrix_file = count_matrix_file
+    elif rra_min_cpm:
+        threshold = rra_min_cpm
+        use_cpm = True
+        # Determine CPM matrix file location
+        cpm_matrix_file = config.get('cpm_matrix_file')
+        if not cpm_matrix_file:
+            output_dir = config.get('output_dir', 'output')
+            experiment_name = config.get('experiment_name', '')
+            if experiment_name:
+                cpm_matrix_file = os.path.join(output_dir, f"{experiment_name}_sgrna_cpm_matrix.txt")
+            else:
+                cpm_matrix_file = os.path.join(output_dir, "sgrna_cpm_matrix.txt")
+        matrix_file = cpm_matrix_file
+
+        # Compute CPM matrix if it doesn't exist
+        if not os.path.exists(matrix_file):
+            import cpm_matrix as cpm
+            logging.info(f"CPM matrix file {matrix_file} not found. Computing CPM matrix...")
+            cpm.count_and_cpm_matrix(config_file=config.get('config_file', 'config.yaml'))
+            if not os.path.exists(matrix_file):
+                logging.error(f"Failed to generate CPM matrix file: {matrix_file}")
+                return None
+
+    # Load the appropriate matrix
     try:
-        df = pd.read_csv(count_matrix_file, sep='\t', index_col=0)
+        df = pd.read_csv(matrix_file, sep='\t', index_col=0)
     except Exception as e:
-        logging.error(f"Error loading count matrix file {count_matrix_file}: {e}")
+        logging.error(f"Error loading matrix file {matrix_file}: {e}")
         return None
-    
+
     # Check that specified samples exist in the matrix
     missing_samples = [s for s in [treatment_sample, control_sample] if s not in df.columns]
     if missing_samples:
-        logging.error(f"Specified samples not found in count matrix: {missing_samples}")
+        logging.error(f"Specified samples not found in matrix: {missing_samples}")
         return None
-    
+
     # Apply filtering based on method
     if rra_min_count_method == 'any':
-        # Either sample must meet threshold
-        mask = (df[treatment_sample] >= rra_min_count) | (df[control_sample] >= rra_min_count)
+        mask = (df[treatment_sample] >= threshold) | (df[control_sample] >= threshold)
     elif rra_min_count_method == 'all':
-        # Both samples must meet threshold
-        mask = (df[treatment_sample] >= rra_min_count) & (df[control_sample] >= rra_min_count)
+        mask = (df[treatment_sample] >= threshold) & (df[control_sample] >= threshold)
     elif rra_min_count_method == 'control':
-        # Only control sample must meet threshold
-        mask = df[control_sample] >= rra_min_count
+        mask = df[control_sample] >= threshold
     else:
         logging.error(f"Invalid rra_min_count_method '{rra_min_count_method}'. Valid options are: any, all, control")
         return None
-    
+
     passing_sgrnas = df[mask].index.tolist()
-    
+    filter_type = "CPM" if use_cpm else "count"
     logging.info(f"RRA sgRNA filtering: {len(passing_sgrnas)}/{len(df)} sgRNAs passed "
-                f"count threshold of {rra_min_count} using method '{rra_min_count_method}' "
-                f"for samples {treatment_sample}, {control_sample}")
-    
+                 f"{filter_type} threshold of {threshold} using method '{rra_min_count_method}' "
+                 f"for samples {treatment_sample}, {control_sample}")
+
     return passing_sgrnas
 
 def run_mageck_rra(config, comparisons, count_matrix_file, output_dir, experiment_name, force_rerun=False):
@@ -148,6 +181,7 @@ def run_mageck_rra(config, comparisons, count_matrix_file, output_dir, experimen
     gene_sgRNA_min = config.get('gene_sgRNA_min', '')
     normalization_method = config.get('normalization_method', 'median')
     remove_zero_method = config.get('remove_zero_method', 'control')
+    rra_min_good_sgrna = config.get('rra_min_good_sgrna')
     
     # Handle None/empty normalization method
     if normalization_method in [None, '', 'null', 'none']:
@@ -257,13 +291,16 @@ def run_mageck_rra(config, comparisons, count_matrix_file, output_dir, experimen
             '--control-gene', control_gene_file,
             '-n', comparison_prefix,
             '--remove-zero', remove_zero_method,
-            '--normcounts-to-file'
+            '--normcounts-to-file',
+            '--keep-tmp'
         ]
-        
         # Add normalization method only if specified
         if normalization_method is not None:
             cmd.extend(['--norm-method', normalization_method])
-        
+        # Add additional-rra-parameters if rra_min_good_sgrna is set and not empty
+        if rra_min_good_sgrna is not None and str(rra_min_good_sgrna).strip() != '':
+            cmd.extend(['--additional-rra-parameters', f'--min-number-goodsgrna {rra_min_good_sgrna}'])
+
         logging.info(f"[{processed_count}/{len(comparisons)}] Running MAGeCK test for {comparison}")
         print(f"Running MAGeCK RRA analysis {processed_count}/{len(comparisons)}: {comparison}", flush=True)
         

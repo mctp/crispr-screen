@@ -281,7 +281,7 @@ def check_file_exists(file_path, description):
     logging.error(f"Error: {description} {file_path} does not exist or is 0 bytes after multiple attempts.")
     sys.exit(1)
     
-def main(sequences_r1, sequences_r2, cpus, in_fastq_r1, in_fastq_r2, out_fastq_r1, out_fastq_r2, plot, plot_prefix, plot_search_sequence, plot_only, validate, batch_size=1000, chunk_size=1000000, nreads=None, file_interleaved_gz=None, config=None):
+def main(sequences_r1, sequences_r2, cpus, in_fastq_r1, in_fastq_r2, out_fastq_r1, out_fastq_r2, plot, plot_prefix, plot_search_sequence=None, plot_only=False, validate=False, batch_size=1000, chunk_size=1000000, nreads=None, file_interleaved_gz=None, config=None):
     global pigz_available
     pigz_available = util.pigz_available()
     global is_docker
@@ -454,7 +454,7 @@ if __name__ == "__main__":
 
     parser.add_argument('--plot', action='store_true', help='Plot sequence type proportions.')
     parser.add_argument('--plot-prefix', type=str, help='Prefix for plot files.')
-    parser.add_argument('--plot-search-sequence', '--plot-search-sequences', '--plot-seq', type=str, help='Search sequence(s) for plotting.')
+    parser.add_argument('--plot-search-sequence', '--plot-search-sequences', '--plot-seq', type=str, help='Search sequence(s) for plotting (not required if sequences-r1 are set).')
     parser.add_argument('--plot-only', action='store_true', help='Skip read reorientation and do plots.')
 
     parser.add_argument('--validate', action='store_true', help='Validate FASTQ files after processing.')
