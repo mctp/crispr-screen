@@ -8,8 +8,6 @@ import utilities.utilities as util
 import utilities.process_metadata as pm
 import reorient_fastq_parallel as reorient
 import count_mageck as count
-import count_mageck2 as count2
-import count_reco as count_reco
 import count_grep as cg
 import cpm_matrix as cpm
 import find_top_sequences as top
@@ -28,32 +26,16 @@ logging.basicConfig(
 )
 
 def main():
-    
-    config = util.load_config(quiet=True)
 
-    # logging.info("Loaded configuration:")
-    # for key, value in config.items():
-    #     logging.info(f"{key}: {value}")
+    config = util.load_config(quiet=True)
 
     # establish defaults where config file is incomplete
     mode = config.get("mode", config.get("MODE", "fastq"))
-    count_method_config = config.get("count_method", "mageck")
-    
-    # Handle multiple counting methods
-    if isinstance(count_method_config, list):
-        count_methods = count_method_config
-    elif isinstance(count_method_config, str):
-        count_methods = [count_method_config]
-    else:
-        logging.error(f"Invalid count_method configuration: {count_method_config}")
+    count_method = config.get("count_method", "mageck")
+
+    if count_method != "mageck":
+        logging.error(f"Unknown count_method: {count_method}. Only 'mageck' is supported.")
         sys.exit(1)
-    
-    # Validate all count methods
-    valid_methods = ["mageck", "reco"]
-    for method in count_methods:
-        if method not in valid_methods:
-            logging.error(f"Unknown count_method: {method}. Supported methods: {valid_methods}")
-            sys.exit(1)
 
     search_revcomp = config.get("search_revcomp", config.get("SEARCH_REVCOMP", "FALSE"))
 
@@ -68,35 +50,21 @@ def main():
     paired_end_fastq = config.get("paired_end_fastq", "TRUE")
     reorient_fastq = config.get("reorient_fastq", "FALSE")
     sgrna_list_name = config.get("sgrna_list_name", config.get("SGRNA_LIST_NAME", "sgrnas"))
-    orig_sgrna_list_file = config.get("orig_sgrna_list_file", config.get("ORIG_SGRNA_LIST_FILE",None))
-    
-    # Dual sgRNA support
-    orig_sgrna2_list_file = config.get("orig_sgrna2_list_file", None)
-    sgrna2_list_name = config.get("sgrna2_list_name", None)
-    sgrna_pairs_file = config.get("sgrna_pairs_file", None)
-    
-    # Determine if this is a dual sgRNA library
-    is_dual_sgrna = bool(orig_sgrna2_list_file and sgrna2_list_name)
+    orig_sgrna_list_file = config.get("orig_sgrna_list_file", config.get("ORIG_SGRNA_LIST_FILE", None))
 
     ignore_r2 = config.get("ignore_r2", "FALSE")
     trim5_lengths = config.get("trim5_lengths", "")
     keep_tmp = config.get("keep_tmp", "FALSE")
     save_unmapped = config.get("save_unmapped", "FALSE")
-    
-    # ReCo specific parameters
-    vector_file = config.get("vector_file", "")
-    expected_reads = config.get("expected_reads", 1000000)
 
     ncpu = config.get("ncpu", config.get("NCPU", 1))
 
     r1_seqs = config.get("r1_seqs")
     r2_seqs = config.get("r2_seqs")
-    len_pattern = config.get("len_pattern", config.get("LEN_PATTERN", None))
 
     # Determine pattern for distance analysis (used by both reorientation and QC)
     pattern_to_use = None
     if config.get("len_pattern"):
-        # Check if len_pattern is valid (only contains ACTG characters)
         if all(c.upper() in 'ACTG' for c in config['len_pattern']):
             pattern_to_use = config['len_pattern']
 
@@ -127,7 +95,7 @@ def main():
         save_unmapped = save_unmapped.upper() == "TRUE"
 
     generate_references_cmd_opts = ""
-    
+
     config_file = config.get("config_file", "config.sh")
 
     global docker_paths
@@ -139,7 +107,7 @@ def main():
         logging.warning(f"DOCKER_PATHS is set to {docker_paths} in {config_file}, overriding any autodetection of docker.")
     else:
         docker_paths = util.is_docker_env()
-    
+
     logging.info(f"docker_paths: {docker_paths}")
 
     if docker_paths:
@@ -152,7 +120,6 @@ def main():
         output_dir = config.get("output_dir", config.get("OUTPUT_DIR"))
 
     # Auto-detect metadata file format (prefer YAML, fallback to TXT)
-    # Do this after Docker paths are set up so we look in the right directory
     metadata_file = config.get("metadata_file", config.get("METADATA_FILE", None))
     if metadata_file is None:
         if os.path.exists("sample_metadata.yaml"):
@@ -163,7 +130,7 @@ def main():
             logging.error("Neither sample_metadata.yaml nor sample_metadata.txt found.")
             logging.error("Please create a metadata file or specify one in the config.")
             sys.exit(1)
-    
+
     logging.info(f"Using metadata file: {metadata_file}")
 
     # set default references dir
@@ -181,59 +148,6 @@ def main():
     logging.info(f"fastq_dir: {fastq_dir}")
     logging.info(f"output_dir: {output_dir}")
     logging.info(f"mode: {mode}")
-    logging.info(f"count_methods: {count_methods}")
-    logging.info(f"search revcomp: {search_revcomp}")
-    logging.info(f"ncpu: {ncpu}")
-    
-    # Log dual sgRNA configuration
-    if is_dual_sgrna:
-        if "mageck" in count_methods:
-            logging.info("Dual sgRNA library detected - MAGeCK2 will be used for counting")
-        if "reco" in count_methods:
-            logging.warning("Dual sgRNA libraries are not fully supported with ReCo. Using single library ReCo approach.")
-        logging.info(f"Primary library: {sgrna_list_name} (from {orig_sgrna_list_file})")
-        logging.info(f"Secondary library: {sgrna2_list_name} (from {orig_sgrna2_list_file})")
-        
-        # Validate tool availability based on count methods
-        if "mageck" in count_methods:
-            # Validate MAGeCK2 availability
-            if not util.run_command("which mageck2"):
-                logging.error("MAGeCK2 is required for dual sgRNA libraries but is not installed or not in PATH.")
-                logging.error("Please install MAGeCK2 or use single sgRNA library configuration.")
-                sys.exit(1)
-        if "reco" in count_methods:
-            # ReCo is only available for fastq mode
-            if mode != "fastq":
-                logging.error("ReCo only supports 'fastq' mode. Dual sgRNA libraries with ReCo require fastq mode.")
-                sys.exit(1)
-            # Check ReCo availability
-            try:
-                import reco
-                logging.info("ReCo package found")
-            except ImportError:
-                logging.error("ReCo package is required but not installed. Please install ReCo.")
-                sys.exit(1)
-        
-        # Ensure fastq mode for dual sgRNA
-        if mode != "fastq":
-            logging.error(f"Mode '{mode}' is not supported for dual sgRNA libraries. Only 'fastq' mode is supported.")
-            sys.exit(1)
-    else:
-        if "mageck" in count_methods:
-            logging.info("Single sgRNA library - MAGeCK will be used for counting")
-        if "reco" in count_methods:
-            # ReCo is only available for fastq mode
-            if mode != "fastq":
-                logging.error("ReCo only supports 'fastq' mode. Please change mode to 'fastq' or use 'mageck' count_method.")
-                sys.exit(1)
-            logging.info("Single sgRNA library - ReCo will be used for counting")
-            # Check ReCo availability
-            try:
-                import reco
-                logging.info("ReCo package found")
-            except ImportError:
-                logging.error("ReCo package is required but not installed. Please install ReCo.")
-                sys.exit(1)
 
     parser = argparse.ArgumentParser(description="Run CRISPR screen pipeline")
     parser.add_argument("--skip-matrix", action="store_true", default=skip_matrix, help="Skip matrix generation")
@@ -270,7 +184,6 @@ def main():
         ma.mageck_test(config_file=config_file)
         sys.exit(0)
 
-
     if mode == "bam":
         required_software = ["bowtie2", "cutadapt", "samtools"]
         for software in required_software:
@@ -292,6 +205,7 @@ def main():
             else:
                 output = util.run_command(f". {working_dir}/make_bt2_index.sh")
                 logging.info(output)
+
     # process each sample
     for i, library in enumerate(libraries):
         sample = sample_names[i]
@@ -359,7 +273,7 @@ def main():
 
                 with open(fastq_stats_file, "a") as f:
                     f.write(f"{library}\t{new_read_count}\n")
-           
+
             # If no valid len_pattern, try to use first r1_seq
             if not pattern_to_use and r1_seqs:
                 first_r1_seq = r1_seqs[0]
@@ -373,7 +287,6 @@ def main():
                     if not os.path.exists(in_r1_re_fastq) or not os.path.exists(in_r2_re_fastq):
                         logging.info("reorienting fastq files (this will take a long time)...")
                         start_time = time.time()
-                        # reorient_output = util.run_command(f"python {working_dir}/reorient_fastq_parallel.py --sequences-r1 {','.join(r1_seqs)} --sequences-r2 {','.join(r2_seqs)} --cpus {ncpu} --in-fastq-r1 {in_r1_fastq} --in-fastq-r2 {in_r2_fastq} --out-fastq-r1 {in_r1_re_fastq} --out-fastq-r2 {in_r2_re_fastq} --plot --plot-prefix {output_dir}/{sample}")
                         reorient_output = reorient.main(
                             sequences_r1=','.join(r1_seqs),
                             sequences_r2=','.join(r2_seqs),
@@ -400,7 +313,6 @@ def main():
             logging.info("--------")
             logging.info("   R1")
             logging.info("--------")
-            # r1_top_seqs_output = util.run_command(f"python {working_dir}/find_top_sequences.py --in-fastq {in_r1_fastq} --out-fasta {output_dir}/{library}_R1.fa --out-alignment-clustalw {output_dir}/{library}_R1.clustalw.aln --sample-size 1000")
             r1_top_seqs_output = top.find_top_sequences(
                 in_fastq=in_r1_fastq,
                 out_fasta=f"{output_dir}/{library}_R1.fa",
@@ -410,7 +322,6 @@ def main():
                 for line in r1_top_seqs_output.splitlines():
                     sys.stdout.write(line + '\n')
 
-            # Run distance analysis if we have a valid pattern
             if pattern_to_use:
                 r1_distance_to_pattern_output = dist.distance_to_pattern_frequencies(
                     in_fastq=in_r1_fastq,
@@ -533,15 +444,6 @@ def main():
                 ncpu=ncpu
             )
         elif mode == "bam":
-            # BAM mode is not supported for dual sgRNA libraries
-            if is_dual_sgrna:
-                logging.error("BAM mode is not supported for dual sgRNA libraries. Please use 'fastq' mode.")
-                sys.exit(1)
-            
-            # BAM mode always uses MAGeCK (ReCo only supports fastq mode)
-            if "reco" in count_methods:
-                logging.info("BAM mode always uses MAGeCK for counting. ReCo is only available for fastq mode.")
-                
             required_software = ["bowtie2", "cutadapt", "samtools"]
             for software in required_software:
                 if not util.run_command(f"which {software}"):
@@ -552,7 +454,6 @@ def main():
             align_output = util.run_command(f". {working_dir}/align_bt2.sh")
             logging.info(align_output)
 
-            # Always use MAGeCK for BAM mode
             count_output = count.run_mageck_count(
                 mode=mode,
                 sample=sample,
@@ -566,91 +467,24 @@ def main():
                 save_unmapped=save_unmapped,
                 search_revcomp=search_revcomp,
                 ignore_r2=ignore_r2
-            )           
+            )
             logging.info(count_output)
         elif mode == "fastq":
-            # Run counting for each specified method
-            for count_method in count_methods:
-                logging.info(f"Running counting with method: {count_method}")
-                
-                if is_dual_sgrna:
-                    if count_method == "mageck":
-                        # Use MAGeCK2 for dual sgRNA libraries
-                        count_output = count2.run_mageck2_count(
-                            mode=mode,
-                            sample=sample,
-                            output_dir=output_dir,
-                            references_dir=references_dir,
-                            sgrna_list_name=sgrna_list_name,
-                            sgrna2_list_name=sgrna2_list_name,
-                            in_r1_fastq=in_r1_fastq,
-                            in_r2_fastq=in_r2_fastq,
-                            sgrna_pairs_file=sgrna_pairs_file,
-                            trim5_lengths=trim5_lengths,
-                            keep_tmp=keep_tmp,
-                            save_unmapped=save_unmapped,
-                            search_revcomp=search_revcomp,
-                            search_revcomp2=search_revcomp,  # For now, use same setting for both libraries
-                            ignore_r2=ignore_r2
-                        )
-                    elif count_method == "reco":
-                        # Use ReCo for dual sgRNA libraries (single library approach)
-                        logging.warning("Using single library ReCo approach for dual sgRNA library")
-                        count_output = count_reco.run_reco_count(
-                            mode=mode,
-                            sample=sample,
-                            output_dir=output_dir,
-                            references_dir=references_dir,
-                            sgrna_list_name=sgrna_list_name,
-                            in_r1_fastq=in_r1_fastq,
-                            in_r2_fastq=in_r2_fastq,
-                            trim5_lengths=trim5_lengths,
-                            keep_tmp=keep_tmp,
-                            save_unmapped=save_unmapped,
-                            search_revcomp=search_revcomp,
-                            ignore_r2=ignore_r2,
-                            cores=ncpu,
-                            vector_file=vector_file,
-                            expected_reads=expected_reads
-                        )
-                else:
-                    if count_method == "mageck":
-                        # Use regular MAGeCK for single sgRNA libraries
-                        count_output = count.run_mageck_count(
-                            mode=mode,
-                            sample=sample,
-                            output_dir=output_dir,
-                            references_dir=references_dir,
-                            sgrna_list_name=sgrna_list_name,
-                            in_r1_fastq=in_r1_fastq,
-                            in_r2_fastq=in_r2_fastq,
-                            trim5_lengths=trim5_lengths,
-                            keep_tmp=keep_tmp,
-                            save_unmapped=save_unmapped,
-                            search_revcomp=search_revcomp,
-                            ignore_r2=ignore_r2
-                        )
-                    elif count_method == "reco":
-                        # Use ReCo for single sgRNA libraries
-                        count_output = count_reco.run_reco_count(
-                            mode=mode,
-                            sample=sample,
-                            output_dir=output_dir,
-                            references_dir=references_dir,
-                            sgrna_list_name=sgrna_list_name,
-                            in_r1_fastq=in_r1_fastq,
-                            in_r2_fastq=in_r2_fastq,
-                            trim5_lengths=trim5_lengths,
-                            keep_tmp=keep_tmp,
-                            save_unmapped=save_unmapped,
-                            search_revcomp=search_revcomp,
-                            ignore_r2=ignore_r2,
-                            cores=ncpu,
-                            vector_file=vector_file,
-                            expected_reads=expected_reads
-                        )
-                
-                logging.info(f"Completed counting with {count_method}: {count_output}")
+            count_output = count.run_mageck_count(
+                mode=mode,
+                sample=sample,
+                output_dir=output_dir,
+                references_dir=references_dir,
+                sgrna_list_name=sgrna_list_name,
+                in_r1_fastq=in_r1_fastq,
+                in_r2_fastq=in_r2_fastq,
+                trim5_lengths=trim5_lengths,
+                keep_tmp=keep_tmp,
+                save_unmapped=save_unmapped,
+                search_revcomp=search_revcomp,
+                ignore_r2=ignore_r2
+            )
+            logging.info(count_output)
         else:
             logging.error(f"Invalid mode: {mode}")
             sys.exit(1)
@@ -659,13 +493,11 @@ def main():
         logging.info("Skipping matrix generation.")
     else:
         logging.info("building count and cpm matrix files...")
-        # For cpm_matrix.py - explicitly pass the detected metadata file
         cpm_matrix_output = cpm.count_and_cpm_matrix(config_file=config_file, metadata_file=metadata_file)
         if cpm_matrix_output:
             for line in cpm_matrix_output.splitlines():
                 logging.info(line)
         logging.info("plotting count distribution histograms...")
-        # For count_distribution_histograms.R - pass metadata file as environment variable
         histogram_output = util.run_command(f"METADATA_FILE={metadata_file} Rscript {working_dir}/count_distribution_histograms.R")
         if histogram_output:
             for line in histogram_output.splitlines():
@@ -674,20 +506,8 @@ def main():
         if skip_analysis:
             logging.info("Skipping analysis section.")
         else:
-            # Run analysis based on which count methods were used
-            if "mageck" in count_methods:
-                logging.info(f"Running MAGeCK analysis...")
-                analysis_output = util.run_command(f". {working_dir}/mageck_analysis.sh --mode {mode}")
-                if analysis_output:
-                    for line in analysis_output.splitlines():
-                        logging.info(line)
-            
-            if "reco" in count_methods:
-                logging.info("ReCo analysis completed during counting step. No additional analysis needed.")
-            
-            # Check for unknown methods (shouldn't happen due to validation, but good to be safe)
-            unknown_methods = [method for method in count_methods if method not in ["mageck", "reco"]]
-            if unknown_methods:
-                logging.warning(f"Unknown analysis methods: {unknown_methods}")
+            logging.info(f"Running MAGeCK analysis (via Python module)...")
+            ma.mageck_test(config_file=config_file, metadata_file=metadata_file)
+
 if __name__ == "__main__":
     main()
