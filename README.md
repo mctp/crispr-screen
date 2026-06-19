@@ -20,13 +20,12 @@ A main feature of this repository is `reorient_fastq_parallel.py` which corrects
   * matplotlib
   * scipy
   * numpy
-* R 3.4
+* R 4.3
 * R packages
   * tidyverse
-  * openxlsx
-  * org.Hs.eg.db
+  * yaml
   * ggrepel
-  * GGally
+  * cowplot
 * system/cmd line utilities
   * column (from util-linux package)
   * gawk (awk pretending to be gawk will work)
@@ -93,8 +92,8 @@ It will which will contain all the software needed as well as ensure the environ
 * Optional: use the validation tool: `bash validate_sgrna_list.sh --file sgRNAs.txt`
 
 ### 2. create the sample metadata file.
-* Place in base repo dir and name it `sample_metadata.txt`.
-* Use the example as a template `examples/sample_metadata.txt`.
+* Place in base repo dir and name it `sample_metadata.yaml`.
+* Use the example as a template `examples/sample_metadata.yaml`.
 * The metadata file should be a 4 column tab-delimited text file with header.  The column names do not matter, but the order does:
   * **column 1** - library
 A Library ID.
@@ -196,22 +195,21 @@ Number of sequences in class: 999 (99.90%)
 ## 2. Reorient fastq files with `reorient_fastq_parallel.py`
 ### A. Minimum required parameters.
 
-5 fastq files: The input R1 and R2, the output R1 and R2, and the output interleaved file
+4 fastq files: The input R1 and R2, and the output R1 and R2.
 
-At least 1 search sequence (--sequences-r1 must not be empty).  
+At least 1 search sequence (--sequences-r1 must not be empty).
 
 ```
-python reorient_fastq_files.py \ 
+python reorient_fastq_parallel.py \
   --in-fastq-r1 sample_R1.fq.gz \
   --in-fastq-r2 sample_R2.fq.gz \
   --out-fastq-r1 sample_R1.reoriented.fq.gz \
   --out-fastq-r2 sample_R2.reoriented.fq.gz \
-  --file-interleaved-gz interleaved.fq.gz \
   --sequences-r1 <sequence1>,<sequence2> \
   --sequences-r2 <sequence3>,<sequence4>
 ```
 The search sequence(s) must be known in advance.  Choose a sequence expected to be found in R1 for properly oriented read pairs.  This sequence should be long enough to be unique, say 18-20 bases, but not so long that exact matching is thwarted by sequencing errors.
-The example `config.sh` file contains this snippet with 2 search sequences for R1 and R2:
+The example `config.yaml` file contains this snippet with 2 search sequences for R1 and R2:
 ```
 # expected sequences in R1
 r1_seqs=(GCTATTTCTAGCTCTAAAAC                 TCCCACTCCTTTCAAGA)
@@ -236,30 +234,30 @@ r2_seqs=(GTTTTAGAGCTAGAAATAGC                 GAAAGGACGAAACACCG)
 ### building counts and CPM matrices
 * The script `cpm_matrix.py` runs by default with `run_pipeline.py` but it can be run standalone, also, either specifying the configuration file
 ```
-python cpm_matrix.py --config config.sh
+python cpm_matrix.py --config config.yaml
 ```
 or by specifying the sample metadata file and input fastq dir:
 ```
-python cpm_matrix.py --metadata sample_metadata.txt --input-fastq-dir input
+python cpm_matrix.py --metadata sample_metadata.yaml --input-fastq-dir input
 ```
 Counts are obtained for all samples in the metadata file not commented out.
 
 ### plot count histograms
 * After running `cpm_matrix.py`, histograms are produced by `run_pipeline.sh` using `count_distribution_histograms.R`.
-* To run separately, the pipeline context is still required (config,sh, sample_metadata.txt).
+* To run separately, the pipeline context is still required (config.yaml, sample_metadata.yaml).
 ```
-Rscript count_distribution_histogram.R
+Rscript count_distribution_histograms.R
 ```
 * for each sample, 4 plots are produced for counts, log10 counts, CPM, and log10 CPM.  Plots containing all samples are also produced (counts, log10 coutns, CPM, and log10 CPM).
 * The terminal output also prints count stats (from mageck count summary files) and this also includes coverage of mapped reads.
 
 ### run/skip the analysis
-* by default, `mageck test` is run using comparison details in `config.sh`.  If a comparison is not configured, the pipeline will run correctly and generate counts, but may exit with an error.
+* by default, `mageck test` is run using comparison details in `config.yaml`.  If a comparison is not configured, the pipeline will run correctly and generate counts, but may exit with an error.
 * use `--skip-analysis` to stop processing data after running `mageck count`.  
 * use `--analysis-only` to perform the analysis without processing fastq and counting.  Often the counting process only needs to be done one time, but comparisons may be tried in different ways, depending on the experiment.
-* Comparisons are done with `mageck_analysis.sh` and currently only runs `mageck test` with options specified in the configuration file.  
+* Comparisons are done with `mageck_analysis.py` and currently only runs `mageck test` with options specified in the configuration file.  
 
 ### misc
 * use `--help` with any python script to view command line parameters.
-* `run_pipeline.py` and `config.yaml` are superseding `run_pipeline.sh` and `config.sh` (respectively).
+* `run_pipeline.py` uses `config.yaml` for configuration and `sample_metadata.yaml` for sample metadata.
 * optimal settings for `reorient_fastq_parallel.py` are `--batch-size 1000` and `--chunk-size 1000000`.  `--cpus` should be set to something >1 where possible, such as 4, 8 or 16; using higher does not help much.  1M chunk size keeps memory overhead low.  these numbers were obtained empirically and so YMMV.  
