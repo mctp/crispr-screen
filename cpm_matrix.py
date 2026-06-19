@@ -7,51 +7,56 @@ import sys
 import utilities.utilities as util
 import utilities.process_metadata as pm
 
+def _apply_excel_formatting(worksheet, matrix_type):
+    from openpyxl.styles import Font, Border
+    bold_font = Font(bold=True)
+    normal_font = Font(bold=False)
+    no_border = Border()
+    for row in worksheet.iter_rows():
+        for cell in row:
+            cell.border = no_border
+            cell.font = normal_font
+    for cell in worksheet[1]:
+        cell.font = bold_font
+    for column in worksheet.columns:
+        max_length = 0
+        column_letter = column[0].column_letter
+        for cell in column:
+            try:
+                if len(str(cell.value)) > max_length:
+                    max_length = len(str(cell.value))
+            except:
+                pass
+        worksheet.column_dimensions[column_letter].width = min(max_length + 2, 50)
+
+
 def save_matrix_with_excel(df, output_prefix, matrix_type):
     """Save matrix to txt, csv, and xlsx formats with formatted Excel output"""
-    # Save txt and csv as before
     df.to_csv(f"{output_prefix}sgrna_{matrix_type}_matrix.txt", sep='\t')
     df.to_csv(f"{output_prefix}sgrna_{matrix_type}_matrix.csv")
-    
-    # Save Excel with formatting
+
     excel_file = f"{output_prefix}sgrna_{matrix_type}_matrix.xlsx"
     with pd.ExcelWriter(excel_file, engine='openpyxl') as writer:
         df.to_excel(writer, sheet_name=f'{matrix_type.upper()}_Matrix', index=True)
-        
-        # Get the workbook and worksheet
-        workbook = writer.book
-        worksheet = writer.sheets[f'{matrix_type.upper()}_Matrix']
-        
-        # Create a bold font style
-        from openpyxl.styles import Font, Border
-        bold_font = Font(bold=True)
-        normal_font = Font(bold=False)
-        no_border = Border()
-        
-        # First, remove all borders and reset all fonts to normal
-        for row in worksheet.iter_rows():
-            for cell in row:
-                cell.border = no_border
-                cell.font = normal_font
-        
-        # Then apply bold formatting ONLY to the header row (row 1)
-        for cell in worksheet[1]:
-            cell.font = bold_font
-        
-        # Auto-size columns
-        for column in worksheet.columns:
-            max_length = 0
-            column_letter = column[0].column_letter
-            for cell in column:
-                try:
-                    if len(str(cell.value)) > max_length:
-                        max_length = len(str(cell.value))
-                except:
-                    pass
-            adjusted_width = min(max_length + 2, 50)  # Cap at 50 characters
-            worksheet.column_dimensions[column_letter].width = adjusted_width
-    
+        _apply_excel_formatting(writer.sheets[f'{matrix_type.upper()}_Matrix'], matrix_type)
+
     logging.info(f"{matrix_type.capitalize()} matrix saved to {output_prefix}sgrna_{matrix_type}_matrix.txt, .csv, and .xlsx")
+
+
+def save_matrix_with_seqs_excel(df, seq_map, output_prefix, matrix_type):
+    """Save matrix with an added sequence column (3rd column) to txt, csv, and xlsx"""
+    flat = df.reset_index()
+    flat.insert(2, 'sequence', flat['sgrna_id'].map(seq_map))
+
+    flat.to_csv(f"{output_prefix}sgrna_{matrix_type}_matrix_addseqs.txt", sep='\t', index=False)
+    flat.to_csv(f"{output_prefix}sgrna_{matrix_type}_matrix_addseqs.csv", index=False)
+
+    excel_file = f"{output_prefix}sgrna_{matrix_type}_matrix_addseqs.xlsx"
+    with pd.ExcelWriter(excel_file, engine='openpyxl') as writer:
+        flat.to_excel(writer, sheet_name=f'{matrix_type.upper()}_Matrix', index=False)
+        _apply_excel_formatting(writer.sheets[f'{matrix_type.upper()}_Matrix'], matrix_type)
+
+    logging.info(f"{matrix_type.capitalize()} matrix with sequences saved to {output_prefix}sgrna_{matrix_type}_matrix_addseqs.txt, .csv, and .xlsx")
 
 def count_matrix(count_file_paths):
     combined_df = pd.DataFrame()
@@ -74,7 +79,7 @@ def cpm_matrix(count_matrix):
     return cpm_matrix
 
 
-def count_and_cpm_matrix(config_file=None, metadata_file=None, input_fastq_dir=None, output_prefix=None, mode=None):
+def count_and_cpm_matrix(config_file=None, metadata_file=None, input_fastq_dir=None, output_prefix=None, mode=None, addseqs=False):
     
     logging.info(f"config_file: {config_file}")
     logging.info(f"metadata_file: {metadata_file}")
@@ -117,9 +122,18 @@ def count_and_cpm_matrix(config_file=None, metadata_file=None, input_fastq_dir=N
         mode = mode if mode is not None else config.get('MODE', config.get('mode', None))
         output_dir = config.get('OUTPUT_DIR', config.get('output_dir', '.'))
         experiment_name = config.get('EXPERIMENT_NAME', config.get('experiment_name', 'experiment'))
+        orig_sgrna_list_file = config.get('orig_sgrna_list_file', config.get('ORIG_SGRNA_LIST_FILE', None))
     else:
         output_dir = '.'
         experiment_name = 'experiment'
+        orig_sgrna_list_file = None
+
+    if addseqs:
+        if not orig_sgrna_list_file or not os.path.exists(orig_sgrna_list_file):
+            logging.error(f"--addseqs requires orig_sgrna_list_file to be set in config and the file to exist (got: {orig_sgrna_list_file})")
+            raise FileNotFoundError(f"sgRNA list file not found: {orig_sgrna_list_file}")
+        sgrna_df = pd.read_csv(orig_sgrna_list_file, sep='\t', header=0)
+        seq_map = dict(zip(sgrna_df.iloc[:, 0], sgrna_df.iloc[:, 1]))
 
     # Auto-detect metadata file if not specified by command line or config
     if metadata_file is None:
@@ -165,10 +179,14 @@ def count_and_cpm_matrix(config_file=None, metadata_file=None, input_fastq_dir=N
     sgrna_count_matrix = count_matrix(count_file_paths)
 
     save_matrix_with_excel(sgrna_count_matrix, output_prefix, "count")
+    if addseqs:
+        save_matrix_with_seqs_excel(sgrna_count_matrix, seq_map, output_prefix, "count")
 
     logging.info("Building CPM matrix...")
     sgrna_cpm_matrix = cpm_matrix(sgrna_count_matrix)
     save_matrix_with_excel(sgrna_cpm_matrix, output_prefix, "cpm")
+    if addseqs:
+        save_matrix_with_seqs_excel(sgrna_cpm_matrix, seq_map, output_prefix, "cpm")
 
     logging.info("Building CPM files for each sample...")
     for sample in sample_names:
@@ -198,11 +216,13 @@ if __name__ == "__main__":
     parser.add_argument('--input-fastq-dir', help='Path to the directory containing the FASTQ files')
     parser.add_argument('--output-prefix', help='Prefix for output files')
     parser.add_argument('--mode', default="fastq", help='Method used for counting (See config file)')
+    parser.add_argument('--addseqs', action='store_true', help='Also produce matrix files with sgRNA sequences as a 3rd column (requires orig_sgrna_list_file in config)')
     args = parser.parse_args()
     count_and_cpm_matrix(
         config_file=args.config,
         metadata_file=args.metadata,
         input_fastq_dir=args.input_fastq_dir,
         output_prefix=args.output_prefix,
-        mode=args.mode
+        mode=args.mode,
+        addseqs=args.addseqs
     )
