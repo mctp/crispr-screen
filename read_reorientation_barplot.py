@@ -1,5 +1,6 @@
 from Bio import SeqIO
 import matplotlib.pyplot as plt
+import matplotlib.cm
 import gzip
 import logging
 import sys
@@ -211,7 +212,7 @@ def plot_positions(fastq_files, sequences, output_file_prefix="plot", n=100000, 
     logging.info(f"Results saved to {results_file}")
     
     # init plot
-    _, ax = plt.subplots(figsize=(10, 6))
+    _, ax = plt.subplots(figsize=(12, 6))
 
     if use_separate_r1_r2:
         # Custom colors for R1/R2 mode: blue for R1, light blue for R2, light red for not found
@@ -222,11 +223,16 @@ def plot_positions(fastq_files, sequences, output_file_prefix="plot", n=100000, 
         }
     else:
         # Original color scheme for backward compatibility
-        colors = plt.colormaps.get_cmap('tab20')
+        colors = matplotlib.cm.get_cmap('tab20')
         color_map = {cls: colors(i) for i, cls in enumerate(plot_classes)}
 
-    for file, data in positions.items():
+    # Use positional indices for proper bar spacing
+    file_ids = []
+    x_positions = []
+    for idx, (file, data) in enumerate(positions.items()):
         id = data['id']
+        file_ids.append(id)
+        x_positions.append(idx)
         total_sequences = data['total']
         
         if use_separate_r1_r2:
@@ -286,11 +292,15 @@ def plot_positions(fastq_files, sequences, output_file_prefix="plot", n=100000, 
 
         bottom = 0
         for label, perc in zip(labels, percentages):
-            bar = ax.bar(id, perc, bottom=bottom, color=color_map[label], label=label)
+            bar = ax.bar(idx, perc, bottom=bottom, color=color_map[label], label=label, width=0.6)
             if perc > 5:  # Only show text if percentage is > 5%
                 ax.text(bar[0].get_x() + bar[0].get_width() / 2, bottom + perc / 2, f'{perc:.1f}%', 
                        ha='center', va='center', color='white', fontsize=9, fontweight='bold')
             bottom += perc
+    
+    # Set x-axis to use positional indices with file IDs as labels
+    ax.set_xticks(x_positions)
+    ax.set_xticklabels(file_ids, rotation=45, ha='right')
 
     handles, labels = ax.get_legend_handles_labels()
     by_label = dict(zip(labels, handles))
