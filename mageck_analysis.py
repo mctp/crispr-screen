@@ -279,8 +279,10 @@ def run_mageck_rra(config, comparisons, count_matrix_file, output_dir, experimen
             analysis_count_matrix_file = filtered_count_file
             logging.info(f"Using filtered count matrix: {filtered_count_file}")
 
-        # Create control gene file
-        control_gene_file = create_control_gene_file(control_gene_id, comparison_dir)
+        # Create control gene file (only if control_gene_id is set)
+        control_gene_file = None
+        if control_gene_id:
+            control_gene_file = create_control_gene_file(control_gene_id, comparison_dir)
 
         # Run MAGeCK test
         cmd = [
@@ -288,12 +290,14 @@ def run_mageck_rra(config, comparisons, count_matrix_file, output_dir, experimen
             '-k', analysis_count_matrix_file,
             '-t', a,
             '-c', b,
-            '--control-gene', control_gene_file,
             '-n', comparison_prefix,
             '--remove-zero', remove_zero_method,
             '--normcounts-to-file',
             '--keep-tmp'
         ]
+        # Add control gene file only if present
+        if control_gene_file:
+            cmd.extend(['--control-gene', control_gene_file])
         # Add normalization method only if specified
         if normalization_method is not None:
             cmd.extend(['--norm-method', normalization_method])
