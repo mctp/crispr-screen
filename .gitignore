@@ -1,9 +1,39 @@
-# user generated files folders
+# pipeline I/O dirs and per-experiment config
 output/
 input/
-/config.sh
-/config.yaml
-/config.yml
-/sample_metadata.txt
-/sample_metadata.yaml
-/sample_metadata.yml
+
+# sequence data
+*.fastq
+*.fastq.gz
+*.fq
+*.fq.gz
+
+# plain text and tabular data files
+*.txt
+*.tsv
+*.csv
+*.xlsx
+*.xls
+
+# Python bytecode
+__pycache__/
+*.pyc
+*.pyo
+
+# logs
+*.log
+
+# generated plots and alignment outputs
+*.png
+*.pdf
+*.aln
+*.dnd
+
+# IDE / OS
+.vscode/
+Thumbs.db
+*.zip
+
+# md files except for README.md
+*.md
+!README.md

@@ -131,8 +131,45 @@ def process_batch(batch, search_sequences_r1, search_sequences_r2):
     count_r2_fwd = 0
 
     for fwd, rev in batch:
+        # BioPython's FASTQ parser provides the read header as <id> and <description>
+        # the @ is first stripped in a prior step:
+        #     @A00839:331:HNNY2DMXY:1:1101:27543:1094 1:N:0:AGCGCAAA+GCGAGTAC
+        #  >> A00839:331:HNNY2DMXY:1:1101:27543:1094 1:N:0:AGCGCAAA+GCGAGTAC
+        # then the remaining header is used to define "id" and "description"
+        # <id> is the first word
+        #  id = 
+        #     A00839:331:HNNY2DMXY:1:1101:27543:1094
+        # while "description" probably *should* be the remainder of the header, it is not! instead it is the whole header.
+        # description =
+        #     A00839:331:HNNY2DMXY:1:1101:27543:1094 1:N:0:AGCGCAAA+GCGAGTAC
+        # SeqIO checks whether <description> starts with <id>, and if so, it simply writes "<description>"
+        # and in this way, the output header is formatted correctly.
+        # if we first modify <id> however, this causes a problem, as description no longer exactly starts with <id>
+        # and when this happens it writes "<id> <description>"
+        # if we modify the id to append /1, like so:
+        #     A00839:331:HNNY2DMXY:1:1101:27543:1094/1
+        # SeqIO will see that <description> does not start with <id>, and will write the header like this:
+        #     A00839:331:HNNY2DMXY:1:1101:27543:1094/1 A00839:331:HNNY2DMXY:1:1101:27543:1094 1:N:0:AGCGCAAA+GCGAGTAC
+        # which looks like the id is duplicated (not desired)
+        # sources:
+        #   stripping @:
+        #     https://github.com/biopython/biopython/blob/ead54d7b2cca66226681ee37e355f7aa783881f2/Bio/SeqIO/QualityIO.py#L1042
+        #   definition of id and description:
+        #     https://github.com/biopython/biopython/blob/ead54d7b2cca66226681ee37e355f7aa783881f2/Bio/SeqIO/QualityIO.py#L1088-L1089
+        #   reconstruction of header from id and description:
+        #     https://github.com/biopython/biopython/blob/ead54d7b2cca66226681ee37e355f7aa783881f2/Bio/SeqIO/QualityIO.py#L1637-L1645
+        #
+        # below, the non-id portion of the original description is extracted and this is assigned to description 
+        # this way, seqIO will write the header as "<id> <description>" and <description> will no longer contain the originalid
+
+        # append /1 or /2 to the id to track the original position within the pair
         fwd.id = fwd.id + "/1"
         rev.id = rev.id + "/2"
+
+        # extract the non-id portion and assign this to description
+        fwd.description = " ".join(fwd.description.split()[1:]) if len(fwd.description.split()) > 1 else ""      
+        rev.description = " ".join(rev.description.split()[1:]) if len(rev.description.split()) > 1 else ""
+
         if any(seq in fwd.seq for seq in search_sequences_r1):
             results.append((fwd, rev))
             count_r1_fwd += 1
@@ -281,7 +318,7 @@ def check_file_exists(file_path, description):
     logging.error(f"Error: {description} {file_path} does not exist or is 0 bytes after multiple attempts.")
     sys.exit(1)
     
-def main(sequences_r1, sequences_r2, cpus, in_fastq_r1, in_fastq_r2, out_fastq_r1, out_fastq_r2, plot, plot_prefix, plot_search_sequence, plot_only, validate, batch_size=1000, chunk_size=1000000, nreads=None, file_interleaved_gz=None, config=None):
+def main(sequences_r1, sequences_r2, cpus, in_fastq_r1, in_fastq_r2, out_fastq_r1, out_fastq_r2, plot, plot_prefix, plot_search_sequence=None, plot_only=False, validate=False, batch_size=1000, chunk_size=1000000, nreads=None, file_interleaved_gz=None, config=None):
     global pigz_available
     pigz_available = util.pigz_available()
     global is_docker
@@ -454,7 +491,7 @@ if __name__ == "__main__":
 
     parser.add_argument('--plot', action='store_true', help='Plot sequence type proportions.')
     parser.add_argument('--plot-prefix', type=str, help='Prefix for plot files.')
-    parser.add_argument('--plot-search-sequence', '--plot-search-sequences', '--plot-seq', type=str, help='Search sequence(s) for plotting.')
+    parser.add_argument('--plot-search-sequence', '--plot-search-sequences', '--plot-seq', type=str, help='Search sequence(s) for plotting (not required if sequences-r1 are set).')
     parser.add_argument('--plot-only', action='store_true', help='Skip read reorientation and do plots.')
 
     parser.add_argument('--validate', action='store_true', help='Validate FASTQ files after processing.')

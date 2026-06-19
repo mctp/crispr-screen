@@ -3,7 +3,7 @@
 # supply a fastq and read ID (and optionally a search sequence to highlight)
 # ID is e.g. @A00839:131:HCNHJDRX2:1:2147:14145:16720
 
-# usage: bash fsatq_record_by_id.sh <fastq.gz> <read_id> <optional: search_sequence>
+# usage: bash fastq_record_by_id.sh <fastq.gz> <read_id> <optional: search_sequence>
 
 FQ="$1"
 RID="$2"
@@ -88,7 +88,12 @@ if [[ "$(file $FQ)" =~ "ASCII text" ]]
 then
 	CAT="cat"
 else
-	CAT="zcat"
+	# Use pigz if available (faster parallel decompression), otherwise fall back to zcat
+	if command -v pigz >/dev/null 2>&1; then
+		CAT="pigz -dc"
+	else
+		CAT="zcat"
+	fi
 fi
 
 if [[ "$SRCH_SEQ" == "" ]]
