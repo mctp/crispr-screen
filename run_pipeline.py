@@ -6,7 +6,7 @@ import time
 # sourced python scripts
 import utilities.utilities as util
 import utilities.process_metadata as pm
-import reorient_fastq_parallel as reorient
+import reorient_fastq_2 as reorient
 import count_mageck as count
 import count_grep as cg
 import cpm_matrix as cpm
