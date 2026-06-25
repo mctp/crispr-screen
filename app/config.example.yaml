@@ -1,0 +1,260 @@
+#------------------------------------------------#
+##################################################
+####   CRISPR screen pipeline configuration   ####
+##################################################
+#------------------------------------------------#
+
+mode: fastq
+# required
+# possible values:
+#   - fastq (typical / recommended)
+#       use mageck to count directly from fastq files
+#   - bam (not recommended)
+#       trim and align reads using bowtie2, then count from bam file using mageck
+#   - grep (for experimental use only)
+#       use grep to count sgRNAs from fastq files
+
+paired_end_fastq: true
+
+search_revcomp: true
+# - fastq mode: when counting reads, search for reverse complement of sgrna sequence
+# - bam mode: when generating aligner reference, use reverse complement of the sgrna sequence
+# - try changing this if mapping rate is low
+
+## fastq mode parameters
+reorient_fastq: true # if PCR product is blunt end ligated and thus orientation of reads are randomly flipped
+ignore_r2: true      # set FALSE if not using paired-end reads OR if R2 cannot cover the sgRNA sequence
+
+## less common parameters / debugging
+trim5_lengths:       # empty recommended (let mageck count determine). a comma-separated list of integer distances for mageck count to search for sgRNA sequences
+keep_tmp: false      # false recommended. true for debugging mageck count
+save_unmapped: false # false recommended. true for debugging mageck count
+# notes:
+#       save_unmapped: true is incompatible with trim5_lengths with more than 1 value
+#       sgrna length is forced to 20 if trim5_lengths, keep_tmp, and/or save_unmapped are set
+
+#######################
+####   resources   ####
+#######################
+
+ncpu: 32  # required, at least 1.  no specific recommendation
+
+###################
+####   paths   ####
+###################
+
+docker_paths: true # true if paths are relative to a docker container, false if paths are relative to host
+# note: some code may use another approach to determine if running in a docker environment
+
+# path to code base (this repo)
+working_dir: "."
+docker_working_dir: /repo # this dir must exist as a mounted volume in the docker container
+
+# put fastq files in FASTQ_DIR
+# if metadata provides full path to fastq dir, this can be left blank
+
+fastq_dir: input           # this dir must exist
+docker_fastq_dir: /input   # this dir must exist as a mounted volume in the docker container
+
+output_dir: output         # this dir must exist
+docker_output_dir: /output # this dir must exist as a mounted volume in the docker container
+
+metadata_file: sample_metadata.yaml # see examples - YAML preferred, but old TXT format is still supported
+
+##############################
+####   sgRNA references   ####
+##############################
+
+# sgrnas list file should be tab-delimited text (with headers) and 3 columns:
+#   - sgrna_id (unique)
+#   - sgrna_sequence
+#   - sgrna_target (i.e. gene name)
+# columns names can be anything  not containing spaces or special characters
+
+orig_sgrna_list_file: sgrnas.txt
+
+# files derived from orig_sgrna_list_file will use this base name
+sgrna_list_name: sgrnas
+
+#############################################################
+####   fastq reorientation (if reorient_fastq is true)   ####
+#############################################################
+
+# required if fastq reorientation is required
+#   - sequences are searched for in order of appearance in the arrays, R1 first and then R2
+#   - if any one sequence is found indicating the read is in the wrong orientation, R1 and R2 are swapped
+#   - if no sequence is found, the read will remain in the original orientation
+#   - NB: the program does not check for reverse complements of these sequences
+#   - at least one sequence is required for r1_seqs; r2_seqs is entirely optional
+#   - recommendations
+#     - 2 sequences for each r1_seqs and r2_seqs (only one sequence for r1 is required)
+#     - 16 < sequence length < 24
+#     - avoid long homopolymers (higher changes of sequencing errors)
+#     - avoid any other regions of the read with high error rates
+#     - expected position should be at least several bases from either end of the read
+#
+# note: PCR strategies and/or vectors may differ so YMMV.
+#       examine the sequencing reads to verify the appropriate sequences
+
+
+# example sequences for a scenario using the lentiGuide-Puro 2-vector system
+
+# expected sequences in R1
+r1_seqs:
+  - GCTATTTCTAGCTCTAAAAC      # left adjacent to sgRNA
+  - TCCCACTCCTTTCAAGA         # PCR primer (rev) part (5' 5 bases removed)
+
+# expected sequences in R2
+r2_seqs:
+  - GTTTTAGAGCTAGAAATAGC      # left adjacent to sgRNA (revcomp)
+  - GAAAGGACGAAACACCG         # PCR primer (fwd) part (5' 5 bases removed)
+
+### example sequences for a scenario using the lentiCRISPR v2 1-vector system
+
+## r1_seqs:
+##  - GCTATTTCTAGCTCTAAAAC      # left adjacent to sgRNA
+##  - GCACCGACTCGGTGCCACT       # about 12 bases in from 5' (rev primer part)
+
+## r2_seqs:
+##  - GAAAGGACGAAACACCGG        # right adjacent to sgRNA
+##  - TGGGTAGTTTGCAGT           # PCR primer (fwd) part (5' 5 bases removed)
+
+
+########################################
+####   run_pipeline.sh parameters   ####
+########################################
+
+# note, parameters can be specificed as arguments to run_pipeline.sh as well as defined here
+
+## config variable           ## run_pipeline.sh cmd parameter
+skip_qc: false               # --skip-qc
+skip_matrix: false           # --skip-matrix  (skip count/cpm matrix generation; mageck count results will still be generated)
+skip_analysis: false         # --skip-analysis (skip comparisons, that is, skip running mageck test)
+analysis_only: false         # --analysis-only (skip processing fastq files, generating counts, etc and only run mageck test)
+skip_fastq_processing: false # --skip-fastq-processing (if fastq have already been processed)
+skip_references: false       # --skip-references (bam mode only; skip reference generation if already generated)
+
+########################
+####   QC related   ####
+########################
+
+# optional:
+#   - this sequence is used for distance-to-pattern assessment of reads
+#   - consider using a sequence closer to the 5 end for speed, possibly one defined in r1_reqs
+#   - if not set, then distance-to-pattern will not be calculated
+
+len_pattern:
+
+
+##-----------------------------------------##
+##                                         ##
+##--- variables for bam mode (optional) ---##
+##                                         ##
+##-----------------------------------------##
+
+references_dir: output/references # bam mode only
+  # path where fasta and bowtie2 index files will be stored
+
+##################################################################
+####   aligner reference flanking sequences (bam mode only)   ####
+##################################################################
+
+# these are added to the left and right of reference sgRNA sequences when building the fasta file used to make the bowtie2 index
+# current recommendation: leave these values blank
+
+us_seq: ""    # 5' sequence adjacent to sgRNA, recommended length >= 18 bases
+### us_seq: "taacttgctatttctagctctaaaac"    # 5' sequence adjacent to sgRNA, recommended length >= 18 bases
+ds_seq: ""       # 3' sequence adjacent to sgRNA, recommended length >= 18 bases
+### ds_seq: "cggtgtttcgtcctttccacaag"       # 3' sequence adjacent to sgRNA, recommended length >= 18 bases
+
+#####################################
+####   trimming (bam mode only)  ####
+#####################################
+
+trim_seq: TAGCCTTATTTTAACTTGCTATTTCTAGCTCTAAAAC # trim sequence is 5' vector sequence adjacent to the sgrna sequence
+                                                # recommended length > 18 bases, but it can be longer
+
+##-------------------------------------------------------##
+##                                                       ##
+##--- variables for downstream analysis (comparisons) ---##
+##                                                       ##
+##-------------------------------------------------------##
+
+experiment_name: my_experiment  # if empty, defaults to "experiment"
+control_gene_id: Non-Targeting_Control # leave empty to use non-essential genes
+
+# Analysis method: auto (detect from config), rra, mle, or both
+analysis_method: auto
+
+count_matrix_file:
+cpm_matrix_file:
+# if empty, assume <output_dir>/<experiment_name>_sgrna_count_matrix.txt and _cpm_matrix.txt
+# be sure to run cpm_matrix.py to generate these matrix files
+
+control_sample:
+treatment_sample:
+remove_zero_method: control
+normalization_method: # median is default, mageck recommends using total when median is unstable due to too many zeroes
+
+# RRA analysis: Define pairwise comparisons
+# Format: treatment_sample:control_sample
+# Multiple treatment replicates: sample_rep1,sample_rep2:control
+comparisons:
+  - comparison: treated_rep1:control
+  - comparison: treated_rep2:control
+  - comparison: treated_rep1,treated_rep2:control
+  # Example with plot annotations:
+  # - comparison: treated_rep1:control
+  #   plot_config:
+  #     suffix: "with_highlights"
+  #     highlight_genes:
+  #       - file: "core_essential_genes_hs.txt"
+  #         group_name: "essential"
+  #         color: "blue"
+
+# Optional: RRA sgRNA filtering parameters
+rra_min_count:            # Minimum count threshold for sgRNA filtering
+rra_min_count_method: control   # Filtering method: any, all, control
+
+# MLE analysis: Define design matrices for complex experimental designs
+
+# MLE-specific parameters
+mle_threads: 32              # Number of threads for MLE (defaults to ncpu if not set)
+mle_permutations: 10         # Number of permutation rounds
+
+# configure the following for MLE analysis:
+# design_matrices:
+#   - analysis_name: "treatment_vs_control"
+#     samples: ["control_rep1", "control_rep2", "treated_rep1", "treated_rep2"]
+#     conditions:
+#       - name: "baseline"
+#         values: [1, 1, 1, 1]  # intercept
+#       - name: "treatment_effect"
+#         values: [0, 0, 1, 1]  # treatment effect
+
+# Optional: MLE sgRNA filtering parameters
+# sgrna_min_count: 30       # Minimum count threshold
+# sgrna_min_sample: "control_rep1" # Sample(s) that must meet threshold
+
+## note: below variables are for development use currently
+
+core_essential_genes_file: core_essential_genes_hs.txt # genes must be one per line and must match sgRNA list
+non_essential_genes_file: nonessential_genes_hs.txt # genes must be one per line and must match sgRNA list
+control_sample_min_count: 100 # sgRNA counts less than this in the control sample will be removed
+gene_sgrna_min: 2 # minimum number of sgRNAs per gene for gene to be included in analysis
+
+##------------------------------------------------##
+##                                                ##
+##--- variables for current development use    ---##
+##                                                ##
+##------------------------------------------------##
+
+#########################
+####   cloud paths   ####
+#########################
+
+# currently only used by download_fastq.sh
+cloud_storage_command: "gcloud storage" # e.g. 'gcloud storage' or 'gsutil'
+cloud_storage_ls_command: "gcloud storage ls"
+cloud_storage_cp_command: "gcloud storage cp"
+cloud_fastq_base_path: "gs://my-bucket/fastqs" # base path to fastq files in cloud storage
