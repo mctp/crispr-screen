@@ -10,13 +10,13 @@ mode: fastq
 #   - fastq (typical / recommended)
 #       use mageck to count directly from fastq files
 #   - bam (not recommended)
-#       trim and align reads using bowtie2, then count from bam file using mageck 
+#       trim and align reads using bowtie2, then count from bam file using mageck
 #   - grep (for experimental use only)
 #       use grep to count sgRNAs from fastq files
 
 paired_end_fastq: true
 
-search_revcomp: true 
+search_revcomp: true
 # - fastq mode: when counting reads, search for reverse complement of sgrna sequence
 # - bam mode: when generating aligner reference, use reverse complement of the sgrna sequence
 # - try changing this if mapping rate is low
@@ -47,7 +47,7 @@ docker_paths: true # true if paths are relative to a docker container, false if 
 # note: some code may use another approach to determine if running in a docker environment
 
 # path to code base (this repo)
-working_dir: .
+working_dir: "."
 docker_working_dir: /repo # this dir must exist as a mounted volume in the docker container
 
 # put fastq files in FASTQ_DIR
@@ -93,7 +93,7 @@ sgrna_list_name: sgrnas
 #     - avoid any other regions of the read with high error rates
 #     - expected position should be at least several bases from either end of the read
 #
-# note: PCR strategies and/or vectors may differ so YMMV.  
+# note: PCR strategies and/or vectors may differ so YMMV.
 #       examine the sequencing reads to verify the appropriate sequences
 
 
@@ -138,12 +138,12 @@ skip_references: false       # --skip-references (bam mode only; skip reference 
 ####   QC related   ####
 ########################
 
-# optional: 
+# optional:
 #   - this sequence is used for distance-to-pattern assessment of reads
 #   - consider using a sequence closer to the 5 end for speed, possibly one defined in r1_reqs
 #   - if not set, then distance-to-pattern will not be calculated
 
-len_pattern: AGTTACGCCAAGC
+len_pattern:
 
 
 ##-----------------------------------------##
@@ -180,29 +180,41 @@ trim_seq: TAGCCTTATTTTAACTTGCTATTTCTAGCTCTAAAAC # trim sequence is 5' vector seq
 ##                                                       ##
 ##-------------------------------------------------------##
 
-experiment_name: treatment_vs_DMSO # if empty, defaults to "experiment""
-control_gene_id: Non_Targeting_Control # leave empty to use non-essential genes
+experiment_name: my_experiment  # if empty, defaults to "experiment"
+control_gene_id: Non-Targeting_Control # leave empty to use non-essential genes
 
 # Analysis method: auto (detect from config), rra, mle, or both
 analysis_method: auto
 
-count_matrix_file: output/treatment_vs_DMSO_sgrna_count_matrix.txt
-cpm_matrix_file: output/treatment_vs_DMSO_sgrna_cpm_matrix.txt
+count_matrix_file:
+cpm_matrix_file:
 # if empty, assume <output_dir>/<experiment_name>_sgrna_count_matrix.txt and _cpm_matrix.txt
 # be sure to run cpm_matrix.py to generate these matrix files
 
-control_sample: DMSO_1
-treatment_sample: treatment_1
-remove_zero_method: any
+control_sample:
+treatment_sample:
+remove_zero_method: control
 normalization_method: # median is default, mageck recommends using total when median is unstable due to too many zeroes
 
 # RRA analysis: Define pairwise comparisons
+# Format: treatment_sample:control_sample
+# Multiple treatment replicates: sample_rep1,sample_rep2:control
 comparisons:
-  - treatment_1:DMSO_1
+  - comparison: treated_rep1:control
+  - comparison: treated_rep2:control
+  - comparison: treated_rep1,treated_rep2:control
+  # Example with plot annotations:
+  # - comparison: treated_rep1:control
+  #   plot_config:
+  #     suffix: "with_highlights"
+  #     highlight_genes:
+  #       - file: "core_essential_genes_hs.txt"
+  #         group_name: "essential"
+  #         color: "blue"
 
 # Optional: RRA sgRNA filtering parameters
-rra_min_count: 10           # Minimum count threshold for sgRNA filtering
-rra_min_count_method: any   # Filtering method: any, all, control
+rra_min_count:            # Minimum count threshold for sgRNA filtering
+rra_min_count_method: control   # Filtering method: any, all, control
 
 # MLE analysis: Define design matrices for complex experimental designs
 
@@ -211,20 +223,20 @@ mle_threads: 32              # Number of threads for MLE (defaults to ncpu if no
 mle_permutations: 10         # Number of permutation rounds
 
 # configure the following for MLE analysis:
-design_matrices:
-  - analysis_name: "treatment_vs_control"
-    samples: ["DMSO_1", "DMSO_2", "treatment_1", "treatment_2"]
-    conditions:
-      - name: "baseline"
-        values: [1, 1, 1, 1]  # intercept
-      - name: "treatment_effect" 
-        values: [0, 0, 1, 1]  # treatment effect
+# design_matrices:
+#   - analysis_name: "treatment_vs_control"
+#     samples: ["control_rep1", "control_rep2", "treated_rep1", "treated_rep2"]
+#     conditions:
+#       - name: "baseline"
+#         values: [1, 1, 1, 1]  # intercept
+#       - name: "treatment_effect"
+#         values: [0, 0, 1, 1]  # treatment effect
 
 # Optional: MLE sgRNA filtering parameters
 # sgrna_min_count: 30       # Minimum count threshold
-# sgrna_min_sample: "DMSO_1" # Sample(s) that must meet threshold
+# sgrna_min_sample: "control_rep1" # Sample(s) that must meet threshold
 
-## note: below varables are for development use currently
+## note: below variables are for development use currently
 
 core_essential_genes_file: core_essential_genes_hs.txt # genes must be one per line and must match sgRNA list
 non_essential_genes_file: nonessential_genes_hs.txt # genes must be one per line and must match sgRNA list
@@ -241,10 +253,8 @@ gene_sgrna_min: 2 # minimum number of sgRNAs per gene for gene to be included in
 ####   cloud paths   ####
 #########################
 
-# currently only used by download_fastq.py
+# currently only used by download_fastq.sh
 cloud_storage_command: "gcloud storage" # e.g. 'gcloud storage' or 'gsutil'
-cloud_storage_ls_command: "gcloud storage ls" # e.g. 'gcloud storage' or 'gsutil'
-cloud_storage_cp_command: "gcloud storage cp" # e.g. 'gcloud storage' or 'gsutil'
-cloud_fastq_base_path: "gs://mctp-fastq" # base GCS bucket path (no trailing slash or wildcard)
-alt_fastq_dirs: # fallback subdirs tried in order if the flowcell dir is not found
-  - aws
+cloud_storage_ls_command: "gcloud storage ls"
+cloud_storage_cp_command: "gcloud storage cp"
+cloud_fastq_base_path: "gs://my-bucket/fastqs" # base path to fastq files in cloud storage
