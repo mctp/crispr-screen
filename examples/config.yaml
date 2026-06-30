@@ -241,8 +241,10 @@ gene_sgrna_min: 2 # minimum number of sgRNAs per gene for gene to be included in
 ####   cloud paths   ####
 #########################
 
-# currently only used by download_fastq.sh
+# currently only used by download_fastq.py
 cloud_storage_command: "gcloud storage" # e.g. 'gcloud storage' or 'gsutil'
 cloud_storage_ls_command: "gcloud storage ls" # e.g. 'gcloud storage' or 'gsutil'
 cloud_storage_cp_command: "gcloud storage cp" # e.g. 'gcloud storage' or 'gsutil'
-cloud_fastq_base_path: "gs://mctp-fastq/*" # can include wildcard if cloud storage command can parse them, e.g. 'gs://my-fastq/*'
+cloud_fastq_base_path: "gs://mctp-fastq" # base GCS bucket path (no trailing slash or wildcard)
+alt_fastq_dirs: # fallback subdirs tried in order if the flowcell dir is not found
+  - aws

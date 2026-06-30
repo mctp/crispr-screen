@@ -22,7 +22,7 @@ RUN git clone https://github.com/davidliwei/mageck2.git /tmp/mageck2 && \
     rm -rf /tmp/mageck2
 # verify installation
 RUN mageck2 --version
-RUN curl -sSL https://sdk.cloud.google.com > /tmp/gcl && bash /tmp/gcl --install-dir=~/ --disable-prompts
-ENV PATH $PATH:~/google-cloud-sdk/bin
+RUN curl -sSL https://sdk.cloud.google.com > /tmp/gcl && bash /tmp/gcl --install-dir=/home/mambauser/ --disable-prompts
+ENV PATH $PATH:/home/mambauser/google-cloud-sdk/bin
 RUN python -c 'import uuid; print(uuid.uuid4())' > /tmp/my_uuid
 RUN pip install git+https://github.com/MaWeffm/reco.git#egg=reco

@@ -29,11 +29,15 @@ __pycache__/
 *.aln
 *.dnd
 
+# app JS dependencies (fetch via instructions in app/APP_README.md)
+app/www/
+
 # IDE / OS
 .vscode/
 Thumbs.db
 *.zip
 
-# md files except for README.md
+# md files except for README.md and APP_README.md
 *.md
 !README.md
+!app/APP_README.md
